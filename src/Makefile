@@ -8,6 +8,7 @@ ALL_MODULE += env01
 ALL_MODULE += app03
 
 LDFLAGS += -lpthread
+LDFLAGS += -lXaw
 LDFLAGS += -lXt -lXmu -lX11 -lSM -lICE 
 
 VERSION=0.1
@@ -28,7 +29,12 @@ docs:
 app01: app01.o args.o
 
 csv-util.o csv-tool.o: csv.h
-app03: app03.o subcmd.o stl.o term.o temp.o xwin.o csv-util.o csv-tool.o
+APP03_OBJS = app03.o subcmd.o stl.o term.o temp.o csv-util.o csv-tool.o
+APP03_OBJS += xwin.o 
+APP03_OBJS += xt-proc.o
+APP03_OBJS += awt.o awt-util.o
+
+app03: $(APP03_OBJS)
 
 rpm: 
 	tar zcf $(RPMBASE)/$(APP_NAME)-$(VERSION).tar.gz \
