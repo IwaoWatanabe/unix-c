@@ -19,7 +19,7 @@ using namespace std;
 #include "csv.h"
 
 /// CSVを読み込み、その語の加工処理を CSV_Reader に委譲するクラスが実装するインタフェース
-/// 
+
 class CSV_Source {
 protected:
   /// 処理を開始する前に呼び出される

@@ -22,6 +22,9 @@ DESTDIR=
 
 all: $(ALL_MODULE)
 
+docs: 
+	doxygen
+
 app01: app01.o args.o
 
 csv-util.o csv-tool.o: csv.h
@@ -36,7 +39,7 @@ rpm:
 install: all
 	mkdir -p  $(DESTDIR)$(MYBINDIR)
 	install -c -t $(DESTDIR)$(MYBINDIR) $(ALL_MODULE) run.sh
-#	doxygen
+	doxygen
 	mkdir -p $(DESTDIR)$(MYDOCDIR) 
 	test -d html && cp -Rf html $(DESTDIR)$(MYDOCDIR) || true
 	rmdir -p $(DESTDIR)$(MYDOCDIR) || true
