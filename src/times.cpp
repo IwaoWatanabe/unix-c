@@ -14,7 +14,7 @@ struct timebuf {
   int load_time();
 
   /// ファイルの最終更新時間を入手する
-  int file_mtime(const char *file_name);
+  bool file_mtime(const char *file_name);
 
   /// 時間情報を出力する
   void show_time(FILE *fp);
@@ -36,7 +36,7 @@ timebuf::load_time() {
   return 1;
 }
 
-int
+bool
 timebuf::file_ntime(const char *file_name) {
   struct stat sbuf;
   int rc = stat(file_name, &sbuf);
@@ -44,7 +44,7 @@ timebuf::file_ntime(const char *file_name) {
     epoch_interval = sbuf.st_mtime;
   else
     fprintf(stderr,"stat %s: %s\n",file_name,strerror(errno));
-  return rc;
+  return rc == 0;
 }
 
 //static const char *week_name = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", };
@@ -71,6 +71,9 @@ int main(int argc, char **argv) {
   tb.load_time();
   tb.show_time(stdout);
   putchar('\n');
+
+  tb.file_ntime(__FILE__);
+
 
   return 0;
 }
