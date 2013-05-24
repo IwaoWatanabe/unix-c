@@ -10,6 +10,7 @@ ALL_MODULE += app03
 LDFLAGS += -lpthread
 LDFLAGS += -lXaw
 LDFLAGS += -lXt -lXmu -lX11 -lSM -lICE 
+LDFLAGS += -lncursesw
 
 VERSION=0.1
 RPMBASE=~/rpm/SOURCES

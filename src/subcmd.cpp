@@ -1,3 +1,6 @@
+/*! \file
+ * \brief サブコマンドをサポートするコード
+ */
 
 #include "subcmd.h"
 #include <cstdio>
@@ -39,12 +42,31 @@ static int subcmd_cmp(const void *a, const void *b) {
 
 /// 登録済みサブコマンドの確認
 static void subcmd_show(subcmd **ptr, size_t len, FILE *fout) {
-  subcmd **pt;
+
   qsort(cmap_ptr, cmap_len, sizeof cmap_ptr[0], subcmd_cmp);
 
-  for (pt = ptr; pt < ptr + len; pt++) {
+  for (subcmd **pt = ptr; pt < ptr + len; pt++) {
     fprintf(fout, "%s\n", (*pt)->cmd);
   }
+
+  fprintf(stderr, "INFO: %d subcommand aviable.\n", (int)len);
+}
+
+namespace term {
+  extern void show_column_entries(const char **names, FILE *fp, bool sort_flag = false);
+};
+
+/// 登録済みサブコマンドの確認(もう一つの実装)
+static void subcmd_show2(subcmd **ptr, size_t len, FILE *fout) {
+  const char *names[len + 1], **pp = names;
+
+  for (subcmd **pt = ptr; pt < ptr + len; pt++) {
+    *pp++ = (*pt)->cmd;
+  }
+  *pp = 0;
+
+  term::show_column_entries(names, fout, true);
+
   fprintf(stderr, "INFO: %d subcommand aviable.\n", (int)len);
 }
 
@@ -52,7 +74,7 @@ static void subcmd_show(subcmd **ptr, size_t len, FILE *fout) {
 static int subcmd_run(subcmd **ptr, size_t len, int argc, char **argv) {
 
   if (argc <= 1) {
-    subcmd_show(ptr, len, stderr);
+    subcmd_show2(ptr, len, stderr);
     return -1;
   }
 
@@ -71,6 +93,7 @@ static int subcmd_run(subcmd **ptr, size_t len, int argc, char **argv) {
 }
 
 
+/// サブコマンドを実行
 int subcmd_run(int argc, char **argv, void (*usage)(const char *cmd)) {
   int rc = subcmd_run(cmap_ptr, cmap_len, argc, argv);
   if (rc < 0 && usage) (*usage)(argv[0]);
