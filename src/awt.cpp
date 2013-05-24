@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cctype>
 #include <time.h>
+#include <vector>
 #include <map>
 
 #include <X11/StringDefs.h>
@@ -37,6 +38,7 @@
 #include <X11/Xmu/Editres.h>
 
 #include "xt-proc.h"
+#include "SmeCascade.h"
 
 using namespace std;
 
@@ -642,6 +644,303 @@ namespace xwin {
 
 };
 
+// --------------------------------------------------------------------------------
+
+namespace xwin {
+
+  // ウィジェットの名前を元にメニューを探す
+  static Widget find_menu(Widget widget, String name) {
+    Widget w, menu;
+    
+    for (w = widget; w != NULL; w = XtParent(w))
+      if ((menu = XtNameToWidget(w, name)) != NULL) return menu;
+    return NULL;
+  }
+
+  /// メニュー・アイテムの登録準備
+  struct menu_item {
+    String name; ///< アイテム名
+    XtCallbackProc proc; ///< コールバック
+    XtPointer closure; ///< クライアント・データに渡す値
+    struct menu_item *sub_menu; ///< カスケード
+  };
+
+  static void menu_popup_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " popup" << endl;
+  }
+
+  static void menu_popdown_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " popdown" << endl;
+  }
+
+  /** AWのポップアップメニューを作成する
+   */
+  static Widget create_popup_menu(String menu_name, Widget shell, menu_item *items) {
+
+    Widget menu = 
+      XtVaCreatePopupShell( menu_name, simpleMenuWidgetClass, shell, NULL );
+
+    XtAddCallback(menu, XtNpopupCallback, menu_popup_proc, 0);
+    XtAddCallback(menu, XtNpopdownCallback, menu_popdown_proc, 0);
+
+    Widget item;
+
+    for (int i = 0; items[i].name; i++) {
+      if (strcmp("-", items[i].name) == 0) {
+	XtVaCreateManagedWidget("-", smeLineObjectClass, menu, NULL );
+	continue;
+      }
+
+      if (items[i].sub_menu) {
+	Widget sub = create_popup_menu(items[i].name, shell, items[i].sub_menu);
+	item = XtVaCreateManagedWidget(items[i].name, smeCascadeObjectClass, menu, 
+				       XtNsubMenu, sub, NULL );
+	continue;
+      }
+
+      item = XtVaCreateManagedWidget(items[i].name, smeBSBObjectClass, menu, NULL );
+      if (items[i].proc)
+	XtAddCallback(item, XtNcallback, items[i].proc, items[i].closure);
+    }
+    return menu;
+  }
+
+  /// パラメータにキーが含まれているか診断する
+  static bool param_contains(String name, String *params, Cardinal num) {
+    if (name == NULL || strcasecmp(name,"") == 0 || num == 0) return false;
+    for (Cardinal n = 0; n < num; n++) {
+      if (strcasecmp(name, params[n]) == 0) return true;
+    }
+    return false;
+  }
+
+  /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
+  static void viewport_callback(Widget porthole, XtPointer closure, XtPointer data) {
+    XawPannerReport *rep = (XawPannerReport *)data;
+  
+    cerr << "TRACE: y:" << rep->slider_y << " x:" << rep->slider_x
+	 << " slider width:" << rep->slider_width << " height:" << rep->slider_height
+	 << " canvas width:" << rep->canvas_width << " height:" << rep->canvas_height
+	 << " changed:" << rep->changed << endl;
+  }
+
+  /// リスト項目で次のエントリに移動するアクション
+  /**
+   * パラメータとして有効なのは next, previous, above, below
+   * それ以外のパラメータが渡ってきた場合は無視する
+   */
+  static void change_item_action(Widget list, XEvent *event, String *params, Cardinal *num) {
+    XawListReturnStruct *rs = XawListShowCurrent(list);
+
+    int numberStrings, columns;
+    Boolean isVertical;
+
+    XtVaGetValues(list, XtNnumberStrings, &numberStrings, 
+		  XtNdefaultColumns, &columns,
+		  XtNverticalList, &isVertical,
+		  NULL );
+
+    columns = getXawListColumns(list);
+
+#if 0
+    cerr << "TRACE: " << numberStrings << " items." << endl;
+    cerr << "TRACE: index: " << rs->list_index << " "
+	 << "columns: " << columns << " "
+	 << "vertical: " << isVertical << endl;
+#endif
+    
+    if (num == 0 || param_contains("next",params,*num)) {
+      if (rs->list_index + 1 < numberStrings)
+	XawListHighlight(list, ++rs->list_index);
+    }
+    else if (param_contains("previous",params,*num)) {
+      if (rs->list_index > 0)
+	XawListHighlight(list, --rs->list_index);
+    }
+    else if (param_contains("below",params,*num)) {
+      if (rs->list_index + columns < numberStrings)
+	XawListHighlight(list, rs->list_index += columns);
+    }
+    else if (param_contains("above",params,*num)) {
+      if (rs->list_index >= columns)
+	XawListHighlight(list, rs->list_index -= columns);
+    }
+    else {
+      cerr << "WARN: unnkown no operation" << endl;
+      return;
+    }
+
+    rs = XawListShowCurrent(list);
+    XtCallCallbacks(list, XtNcallback, (XtPointer)rs);
+  }
+
+  extern bool load_dirent(const char *dirpath, vector<string> &entries, bool with_hidden_file = false);
+  extern String *as_String_array(vector<string> &entries);
+
+  /// メニューアイテムを選択した時の処理
+  static void menu_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+  }
+
+  /// リスト表示アプリの構成要素を格納
+  struct list_app : xt00 {
+    Widget list;
+    vector<string> entries;
+
+    XawListReturnStruct last_selected;
+    XtIntervalId timer;
+    long interval; // ms
+
+    list_app() : list(0), timer(0),interval(400) { }
+    ~list_app() { }
+    void create_contents(Widget top);
+  };
+
+  /// リストアイテムを選択した時の処理
+  static void item_selected_timer(XtPointer closure, XtIntervalId *id) {
+    list_app *app = (list_app *)closure;
+
+    app->timer = 0;
+    cerr << "TRACE: item selected:" << app->last_selected.list_index 
+	 << ":" << app->last_selected.string << endl;
+  }
+
+  /// リストアイテムを選択した時の処理
+  static void item_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
+    XawListReturnStruct *rs = (XawListReturnStruct *)call_data;
+    list_app *app = (list_app *)client_data;
+
+    app->last_selected = *rs;
+    // このタイミングではタイマーを設定するだけで、主要な処理は遅延実行する
+
+    if (app->timer) XtRemoveTimeOut(app->timer);
+    app->timer =
+      XtAppAddTimeOut(XtWidgetToApplicationContext(widget),
+		      app->interval, item_selected_timer, app);
+    if (0)
+      cout << "TRACE: " << XtName(widget) << " item selected." << endl;
+  }
+
+  void list_app::create_contents(Widget top) {
+
+    load_dirent(".", entries, false);
+    String *slist = as_String_array(entries);
+
+    Widget pane = 
+      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
+    Widget menu_bar = 
+      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
+
+    XtVaCreateManagedWidget("list", menuButtonWidgetClass, menu_bar, 
+			    XtNmenuName, "list-menu", 
+			    NULL);
+
+    struct menu_item sub_items[] = {
+      { "sub-item1", menu_selected, },
+      { "sub-item2", menu_selected, },
+      { "sub-item3", menu_selected, },
+      { 0, },
+    };
+
+    struct menu_item items[] = {
+      { "item1", menu_selected, },
+      { "item2", menu_selected, },
+      { "menu-item2", menu_selected, 0, sub_items },
+      { "-", },
+      { "close", quit_application, },
+      { 0, },
+    };
+
+    create_popup_menu("list-menu", pane, items);
+
+    Widget viewport = 
+      XtVaCreateManagedWidget("viewport", viewportWidgetClass, pane,
+			      XtNallowVert, True,
+			      XtNuseRight, True,
+			      NULL);
+    XtAddCallback(viewport, XtNreportCallback, viewport_callback, 0);
+    list = 
+      XtVaCreateManagedWidget("list", listWidgetClass, viewport,
+			      XtNlist, (XtArgVal)slist,
+			      XtNpasteBuffer, True,
+			      //XtNdefaultColumns, (XtArgVal)1,
+			      NULL);
+    XtAddCallback(list, XtNcallback, item_selected, this);
+
+    Widget close = 
+      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
+    XtAddCallback(close, XtNcallback, quit_application, 0);
+
+    XtInstallAccelerators(list, close);
+    XtRealizeWidget(top);
+
+    // 初期状態で選択されているようにする
+    XawListHighlight(list, 0);
+    
+    Widget vertical = XtNameToWidget(viewport, "vertical");
+    if (vertical) XtInstallAccelerators(list, vertical);
+
+    XtAddEventHandler(top, NoEventMask, True, dispose_handler, 0);
+    XSetWMProtocols(XtDisplay(top), XtWindow(top), &WM_DELETE_WINDOW, 1 );
+
+    XtAddCallback(top, XtNdestroyCallback, delete_app_proc, this);
+  }
+
+  /// リスト表示の確認
+  static int awt_list(int argc, char **argv) {
+
+    static String app_class = "ListApp", 
+      fallback_resouces[] = { 
+      "*international: True",
+      "*fontSet: -*-*-*-*-*--24-*",
+      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "*List.font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "ListApp.geometry: 800x400",
+      
+      "*Viewport.vertical.accelerators: #override "
+      " Ctrl<KeyPress>Next: StartScroll(Forward) NotifyScroll(Proportional) EndScroll()\\n"
+      " Ctrl<KeyPress>Prior: StartScroll(Backward) NotifyScroll(Proportional) EndScroll()\\n"
+      " <Btn4Down>: StartScroll(Backward)\\n"
+      " <Btn5Down>: StartScroll(Forward)\\n"
+      " <BtnUp>:NotifyScroll(Proportional) EndScroll()\n",
+      
+      "*Viewport.vertical.translations: #override "
+      " <Btn4Down>: StartScroll(Backward)\\n"
+      " <Btn5Down>: StartScroll(Forward)\\n",
+    
+      "*List.translations: #override "
+      " Ctrl<Key>f: changeItem(next)\\n"
+      " Ctrl<Key>b: changeItem(previous)\\n"
+      " <Key>Right: changeItem(next)\\n"
+      " <Key>Left: changeItem(previous)\\n"
+      " <Key>Up: changeItem(above)\\n"
+      " <Key>Down: changeItem(below)\\n"
+      " <Btn1Down>: Set() Notify() \\n"
+      " Ctrl <Btn3Down>: XawPositionSimpleMenu(list-menu) XtMenuPopup(list-menu)\\n",
+      "*.close.accelerators: #override Ctrl<KeyPress>w: set() notify() unset()\\n",
+      0,
+    };
+
+    XtActionsRec actions[] = { 
+      { "changeItem", change_item_action, },
+    };
+
+    XtSetLanguageProc(NULL, NULL, NULL);
+
+    XtAppContext context;
+    Widget top = 
+      XtVaAppInitialize(&context, app_class, NULL, 0,
+			&argc, argv, fallback_resouces, NULL);
+
+    XtAppAddActions(context, actions, XtNumber(actions));
+    xatom_initialize(XtDisplay(top));
+
+    list_app *app = new list_app();
+    app->create_contents(top);
+    return app->main_loop(context);
+  }
+
+};
 
 // --------------------------------------------------------------------------------
 
@@ -655,6 +954,7 @@ subcmd awt_cmap[] = {
   { "dialog", xwin::awt_dialog, },
   { "dialog02", xwin::awt_dialog02, },
   { "tree", xwin::awt_class_tree, },
+  { "list", xwin::awt_list, },
   { 0 },
 };
 
