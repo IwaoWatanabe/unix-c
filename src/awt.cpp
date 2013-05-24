@@ -302,6 +302,159 @@ namespace xwin {
   static int awt_hello(int argc, char **argv) {
     return run(new hello_app, &argc,argv);
   }
+
+};
+
+
+// --------------------------------------------------------------------------------
+
+namespace xwin {
+
+  /// ダイアログをウィジェット相対で表示する
+  static void popup_dialog(Widget target, Widget shell, XtGrabKind kind) {
+    Position x, y, rootx, rooty;
+    Dimension width, height;
+
+    if (!shell) return;
+
+    // ポップアップすべき位置の計算
+    XtVaGetValues(target, XtNx, &x, XtNy, &y, 
+		  XtNwidth, &width, XtNheight, &height, NULL);
+    
+    XtTranslateCoords(XtParent(target), x, y, &rootx, &rooty );
+
+    XtVaSetValues(shell, XtNx, rootx + width - 25,
+		XtNy, rooty + height - 25, NULL );
+    XtPopup(shell, kind);
+  }
+
+  /** Commandに登録するコールバック
+   * @param widget この関数を呼び出したCommandの参照
+   * @param client_data コールバック登録で渡したデータ
+   * @param call_data Commandの場合は未使用
+   */
+  static void open_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget shell = (Widget)client_data;
+    // モーダルダイアログ（ただし他のウィンドウとは非排他的)
+    popup_dialog(widget, shell, XtGrabNonexclusive);
+  }
+
+  /// ダイアログのボタンが押されたタイミングでポップダウンさせるためのコールバック
+  static void close_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget dialog = (Widget)client_data;
+    XtPopdown(dialog);
+  }
+
+  /// ダイアログを表示する
+  struct dialog_app : hello_app {
+    virtual Widget create_shell(int *argc, char **argv);
+    virtual void create_content(Widget shell, int argc, char **argv);
+  };
+
+
+  Widget dialog_app::create_shell(int *argc, char **argv) {
+    static String app_class = "Hello2", 
+      fallback_resouces[] = { 
+      "*international: True",
+      "*fontSet: -*-*-*-*-*--24-*",
+      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "*geometry: 320x100",
+      "*.press.label: Press Me!",
+      "*.press.accelerators: Meta<KeyPress>p: set() notify() unset()\\n"
+      " <KeyPress>space: set() notify() unset()",
+      
+      "*.dialog.label: Do You want to quit ?",
+      "*.yes.accelerators: <KeyPress>y: set() notify() unset() \\n"
+      " <KeyPress>space: set() notify() unset()",
+      
+      "*.no.accelerators: <KeyPress>n: set() notify() unset()\\n"
+      " <KeyPress>Escape: set() notify() unset()",
+      NULL,
+    };
+
+    XtAppContext context;
+    return 
+      XtVaAppInitialize(&context, app_class, NULL, 0,
+			argc, argv, fallback_resouces, NULL);
+  }
+  
+  /// 子ウィジェットを探して、アクセラレータを登録する
+  static void install_accelerators(Widget parent, const char *name) {
+    Widget wi = XtNameToWidget(parent, name);
+    if (wi) {
+      XtAccelerators accelerators;
+      XtVaGetValues(wi, XtNaccelerators, &accelerators, NULL);
+      XtInstallAccelerators(parent, wi);
+      cerr << "TRACE: widget " << name << ":" << getXtName(wi) << endl;
+      cerr << "TRACE: accelerators: " << accelerators << endl;
+    }
+  }
+
+  void dialog_app::create_content(Widget top, int argc, char **argv) {
+    Widget shell = XtVaCreatePopupShell("confirm", transientShellWidgetClass, top, NULL );
+    Widget dialog = XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, NULL );
+    /* ウィジット関数によってダイアログ内部のボタンをセットする */
+    XawDialogAddButton(dialog, "yes", quit_application, 0 );
+    XawDialogAddButton(dialog, "no", close_dialog, shell );
+
+    install_accelerators(dialog, "yes");
+    install_accelerators(dialog, "no");
+
+    Widget box = XtVaCreateManagedWidget("box", boxWidgetClass, top, NULL);
+    Widget press = XtVaCreateManagedWidget("press", commandWidgetClass, box, NULL);
+    XtAddCallback(press, XtNcallback, open_dialog, shell);
+
+#if 1  
+    cerr << "install to box" << endl;
+    XtInstallAccelerators(box, press);
+#else
+    // こちらは必要なかった
+    cerr << "install to shell" << endl;
+    XtInstallAccelerators(top, press);
+#endif
+  }
+
+  /// ポップアップ・ダイアログを出現させる
+  static int awt_dialog(int argc, char **argv) {
+    return run(new dialog_app, &argc,argv);
+  }
+
+  /// ダイアログを出現して終了する
+  static int awt_dialog02(int argc, char **argv) {
+
+    static String app_class = "MessageBox", 
+      fallback_resouces[] = { 
+      "*international: True",
+      "*fontSet: -*-*-*-*-*--24-*",
+      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "*.ok.accelerators: <KeyPress>Return: set() notify() unset()\\n"
+      " <KeyPress>space: set() notify() unset()",
+      NULL,
+    };
+
+    XtSetLanguageProc(NULL, NULL, NULL);
+
+    XtAppContext context;
+    static XrmOptionDescRec options[] = { };
+
+    Widget top = 
+      XtVaOpenApplication(&context, app_class, options, XtNumber(options),&argc,argv,
+			  fallback_resouces, applicationShellWidgetClass, NULL);
+
+    Widget dialog = XtVaCreateManagedWidget("dialog", dialogWidgetClass, top, NULL );
+    /* ウィジット関数によってダイアログ内部のボタンをセットする */
+    XawDialogAddButton(dialog, "ok", quit_application, 0 );
+    XtVaSetValues(dialog, XtNlabel, XtNewString("press ok to close application."), NULL);
+
+    install_accelerators(dialog, "ok");
+  
+    XtRealizeWidget(top);
+    XtAppMainLoop(context);
+    XtDestroyApplicationContext(context);
+    cerr << "TRACE: context destroyed." << endl;
+    return 0;
+  }
+
 };
 
 
@@ -311,10 +464,11 @@ namespace xwin {
 
 subcmd awt_cmap[] = {
   { "top", xwin::onlytop, },
-  { "multi", xwin::awt_multi_apps, },
-
   { "win03", xwin::onlytop, },
+  { "multi", xwin::awt_multi_apps, },
   { "hello02", xwin::awt_hello, },
+  { "dialog", xwin::awt_dialog, },
+  { "dialog02", xwin::awt_dialog02, },
   { 0 },
 };
 
