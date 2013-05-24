@@ -457,6 +457,191 @@ namespace xwin {
 
 };
 
+// --------------------------------------------------------------------------------
+
+namespace xwin {
+
+  /// クラス階層を表示するアプリのデータを保持する
+  struct tree_app : xt00 { 
+    /// クラス名とそれを表示するウィジェットの組を保持する
+    map<string, Widget> nodes;
+
+    Widget find_node(WidgetClass wc);
+    Widget add_node(WidgetClass wc, Widget tree);
+    void create_contents(Widget top);
+  };
+
+  /// クラスに対応するwidgetを入手する
+  Widget tree_app::find_node(WidgetClass wc) {
+    const char *cn = getXtClassName(wc);
+    map<string, Widget>::iterator it = nodes.find(cn);
+    // クラス名でウィジェットを引き出す
+    if (it == nodes.end()) return None;
+    return (*it).second;
+  }
+
+  /// クラスに対応するwidgetを追加する
+  Widget tree_app::add_node(WidgetClass wc, Widget tree) {
+    if (!wc) return None;
+
+    Widget t = find_node(wc);
+    if (t) return t;
+
+    const char *cn = getXtClassName(wc);
+    WidgetClass superClass = getXtSuperClass(wc);
+    if (!superClass) {
+      // トップレベルのノード
+      Widget re = 
+	XtVaCreateManagedWidget(cn, commandWidgetClass, tree, 
+				XtNlabel, XtNewString(cn), NULL);
+      nodes[cn] = re;
+      return re;
+    }
+
+    Widget parent = find_node(superClass);
+    if (parent == None) parent = add_node(superClass, tree);
+  
+    Widget re = 
+      XtVaCreateManagedWidget(cn, commandWidgetClass, tree, 
+			      XtNtreeParent, parent, 
+			      XtNlabel, XtNewString(cn), NULL);
+    nodes[cn] = re;
+    return re;
+  }
+
+  /// pannaer が操作されたタイミングで portholeのウィジェットの位置を変えるためのコールバック
+  static void panner_callback (Widget panner,XtPointer closure,XtPointer data) {
+    XawPannerReport *rep = (XawPannerReport *)data;
+    Widget target = (Widget)closure;
+    Arg args[2];
+    if (!target) return;
+    XtSetArg (args[0], XtNx, -rep->slider_x);
+    XtSetArg (args[1], XtNy, -rep->slider_y);
+    XtSetValues (target, args, 2);
+  }
+
+  /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
+  static void porthole_callback(Widget porthole, XtPointer closure, XtPointer data) {
+    Widget panner = (Widget) closure;
+    XawPannerReport *rep = (XawPannerReport *)data;
+    Arg args[6];
+    Cardinal n = 2;
+
+    XtSetArg (args[0], XtNsliderX, rep->slider_x);
+    XtSetArg (args[1], XtNsliderY, rep->slider_y);
+
+    if (rep->changed != (XawPRSliderX | XawPRSliderY)) {
+      XtSetArg (args[2], XtNsliderWidth, rep->slider_width);
+      XtSetArg (args[3], XtNsliderHeight, rep->slider_height);
+      XtSetArg (args[4], XtNcanvasWidth, rep->canvas_width);
+      XtSetArg (args[5], XtNcanvasHeight, rep->canvas_height);
+      n = 6;
+    }
+    XtSetValues(panner, args, n);
+  }
+
+  void tree_app::create_contents(Widget top) {
+    Widget form = 
+      XtVaCreateManagedWidget("form",formWidgetClass, top, NULL);
+
+    Widget panner = 
+      XtVaCreateManagedWidget("panner", pannerWidgetClass, form, NULL);
+
+    Widget porthole = 
+      XtVaCreateManagedWidget("porthole",portholeWidgetClass, form,
+			    XtNbackgroundPixmap, None, NULL);
+
+    Widget tree = 
+      XtVaCreateManagedWidget("tree", treeWidgetClass, porthole, NULL);
+
+    XtAddCallback(porthole, XtNreportCallback, porthole_callback, panner);
+    XtAddCallback(panner, XtNreportCallback, panner_callback, tree);
+
+    WidgetClass awclasses[] = {
+      applicationShellWidgetClass,
+      asciiSinkObjectClass,
+      asciiSrcObjectClass,
+      asciiTextWidgetClass,
+      boxWidgetClass,
+      commandWidgetClass,
+      dialogWidgetClass,
+      labelWidgetClass,
+      listWidgetClass,
+      menuButtonWidgetClass,
+      panedWidgetClass,
+      pannerWidgetClass,
+      portholeWidgetClass,
+      repeaterWidgetClass,
+      scrollbarWidgetClass,
+      stripChartWidgetClass,
+      toggleWidgetClass,
+      treeWidgetClass,
+      multiSinkObjectClass,
+      multiSrcObjectClass,
+      smeBSBObjectClass,
+      smeLineObjectClass,
+      sessionShellWidgetClass,
+      viewportWidgetClass,
+      simpleMenuWidgetClass,
+      NULL,
+    }, *wc = awclasses;
+
+    while (*wc) {
+      add_node(*wc++, tree);
+    }
+
+    XtRealizeWidget(top);
+    XtAddEventHandler(top, NoEventMask, True, dispose_handler, 0);
+    XSetWMProtocols(XtDisplay(top), XtWindow(top), &WM_DELETE_WINDOW, 1 );
+  
+    Dimension canvas_width, canvas_height, slider_width, slider_height;
+    XtVaGetValues(tree,
+		  XtNwidth, &canvas_width,
+		  XtNheight, &canvas_height,
+		  NULL);
+
+    XtVaGetValues(porthole,
+		  XtNwidth, &slider_width,
+		  XtNheight, &slider_height,
+		  NULL);
+  
+    XtVaSetValues(panner,
+		  XtNcanvasWidth, &canvas_width,
+		  XtNcanvasHeight, &canvas_height,
+		  XtNsliderWidth, &slider_width,
+		  XtNsliderHeight, &slider_height,
+		  NULL);
+  
+    XRaiseWindow (XtDisplay(panner), XtWindow(panner));
+
+    XtAddCallback(top, XtNdestroyCallback, delete_app_proc, this);
+  }
+
+  /// アテナ・ウィジェットのクラス階層を表示する
+  static int awt_class_tree(int argc, char **argv) {
+
+    static String app_class = "AwTree", 
+      fallback_resouces[] = { 
+      "*tree.gravity: west",
+      "*geometry: 800x400",
+      NULL,
+    };
+
+    static XrmOptionDescRec options[] = { };
+
+    XtAppContext context;
+    Widget top = 
+      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
+			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
+
+    xatom_initialize(XtDisplay(top));
+    tree_app *app = new tree_app();
+    app->create_contents(top);
+    return app->main_loop(context);
+  }
+
+};
+
 
 // --------------------------------------------------------------------------------
 
@@ -469,6 +654,7 @@ subcmd awt_cmap[] = {
   { "hello02", xwin::awt_hello, },
   { "dialog", xwin::awt_dialog, },
   { "dialog02", xwin::awt_dialog02, },
+  { "tree", xwin::awt_class_tree, },
   { 0 },
 };
 
