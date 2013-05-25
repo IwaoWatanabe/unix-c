@@ -7,7 +7,7 @@ Group: local
 URL: https://github.com/IwaoWatanabe/unix-c
 Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
-BuildRequires: libXaw-devel
+BuildRequires: doxygen libXaw-devel openmotif-devel
 
 %define prefix /opt/examples-cpp
 

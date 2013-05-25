@@ -8,6 +8,7 @@ ALL_MODULE += env01
 ALL_MODULE += app03
 
 LDFLAGS += -lpthread
+LDFLAGS += -lXm -lMrm -lUil
 LDFLAGS += -lXaw
 LDFLAGS += -lXt -lXmu -lX11 -lSM -lICE 
 
@@ -33,6 +34,7 @@ APP03_OBJS = app03.o subcmd.o stl.o term.o temp.o csv-util.o csv-tool.o
 APP03_OBJS += xwin.o 
 APP03_OBJS += xt-proc.o
 APP03_OBJS += awt.o awt-util.o SmeCascade.o
+APP03_OBJS += motif.o 
 
 app03: $(APP03_OBJS)
 
