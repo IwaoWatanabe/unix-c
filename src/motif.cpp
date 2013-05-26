@@ -29,8 +29,11 @@
 #include <Xm/Separator.h>
 #include <Xm/SelectioB.h>
 #include <Xm/ScrolledW.h>
+#include <Xm/Text.h>
 
 using namespace std;
+
+extern std::wstring load_wtext(const char *path, const char *encoding = "UTF-8", time_t *lastmod = 0, size_t buf_len = 4096);
 
 namespace xwin {
 
@@ -336,11 +339,11 @@ namespace xwin {
 
   /// メニューアイテムを選択した時の処理
   static void menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
   }
   
   static void list_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     String app_class = "FileList";
     Widget top = XtVaAppCreateShell(NULL, app_class, applicationShellWidgetClass, XtDisplay(XtParent(widget)), NULL);
     app_shell_count++;
@@ -348,7 +351,7 @@ namespace xwin {
   }
 
   static void passwdlist_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     String app_class = "PasswdList";
     Widget top = XtVaAppCreateShell(NULL, app_class, applicationShellWidgetClass, XtDisplay(XtParent(widget)), NULL);
     app_shell_count++;
@@ -356,19 +359,19 @@ namespace xwin {
   }
 
   static void parts_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
   }
 
   /// ボタン押下の通知
   static void button_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     char *label = (char *)client_data;
-    cout << "TRACE: press button:" << label << endl;
+    cerr << "TRACE: press button:" << label << endl;
   }
 
   /// 情報メッセージの出力
   static void info_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     parts_app *app = (parts_app *)client_data;
 
     if (!app->info) {
@@ -389,7 +392,7 @@ namespace xwin {
 
   /// 警告メッセージの出力
   static void warn_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     parts_app *app = (parts_app *)client_data;
 
     if (!app->warn) {
@@ -424,7 +427,7 @@ namespace xwin {
 
   // エラー・メッセージの出力
   static void err_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     parts_app *app = (parts_app *)client_data;
 
     if (!app->err) {
@@ -450,23 +453,25 @@ namespace xwin {
 
   /// プロンプト・ダイアログでの入力通知
   static void prompt_inputs_cb(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " inputs callback." << endl;
+    cerr << "TRACE: " << XtName(widget) << " inputs callback." << endl;
     XmSelectionBoxCallbackStruct *cbs = (XmSelectionBoxCallbackStruct *)call_data;
 
     char *value = (char *)XmStringUnparse(cbs->value, NULL, XmMULTIBYTE_TEXT, XmMULTIBYTE_TEXT, NULL, 0, XmOUTPUT_ALL);
+    /// マルチバイトで取り出す
     cerr << "INFO: " << value << endl;
     XtFree(value);
-    /// マルチバイトで取り出す
 
     wchar_t *wcs = (wchar_t *)XmStringUnparse(cbs->value, NULL, XmWIDECHAR_TEXT, XmWIDECHAR_TEXT, NULL, 0, XmOUTPUT_ALL);
-    wcerr << "INFO: " << wcs << "(wcs)" << endl;
-    XtFree((char *)wcs);
     /// ワイドキャラクタで取り出す
+    wcerr << "INFO: " << wcs << "(wcs)" << endl;
+    fprintf(stderr, "INFO: %ls(wcs fprintf)\n", wcs);
+
+    XtFree((char *)wcs);
   }
 
   /// プロンプト・ダイアログ表示機能の選択
   static void prompt_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     parts_app *app = (parts_app *)client_data;
 
     if (!app->prompt) {
@@ -510,7 +515,7 @@ namespace xwin {
 
   /// コマンドの入力通知
   static void command_entered_cb(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " command callback." << endl;
+    cerr << "TRACE: " << XtName(widget) << " command callback." << endl;
     XmCommandCallbackStruct *cbs = (XmCommandCallbackStruct *)call_data;
 
     switch (cbs->reason) {
@@ -521,14 +526,15 @@ namespace xwin {
     }
 
     wchar_t *wcs = (wchar_t *)XmStringUnparse(cbs->value, NULL, XmWIDECHAR_TEXT, XmWIDECHAR_TEXT, NULL, 0, XmOUTPUT_ALL);
-    wcerr << "INFO: " << wcs << "(wcs)" << endl;
-    XtFree((char *)wcs);
     /// ワイドキャラクタで取り出す
+    wcerr << "INFO: " << wcs << "(wcs)" << endl;
+    fprintf(stderr, "INFO: %ls(wcs fprintf)\n", wcs);
+    XtFree((char *)wcs);
   }
 
   /// コマンド・ダイアログ表示機能の選択
   static void command_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     parts_app *app = (parts_app *)client_data;
 
     if (!app->command) {
@@ -557,7 +563,7 @@ namespace xwin {
   }
 
   static void selection_cb(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     XmSelectionBoxCallbackStruct *cbs =
       (XmSelectionBoxCallbackStruct *)call_data;
     switch (cbs->reason) {
@@ -569,12 +575,14 @@ namespace xwin {
 
     wchar_t *wcs = (wchar_t *)XmStringUnparse(cbs->value, NULL, XmWIDECHAR_TEXT, XmWIDECHAR_TEXT, NULL, 0, XmOUTPUT_ALL);
     wcerr << "INFO: " << wcs << "(wcs)" << endl;
+    fprintf(stderr, "INFO: %ls(wcs fprintf)\n", wcs);
+
     XtFree((char *)wcs);
     /// ワイドキャラクタで取り出す
   }
 
   static void selection_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     parts_app *app = (parts_app *)client_data;
 
     static char *months[] = {
@@ -685,7 +693,7 @@ namespace xwin {
   }
 
   static void tree_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+    cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     String app_class = "Tree";
     Widget top = XtVaAppCreateShell(NULL, app_class, applicationShellWidgetClass, 
 				    XtDisplay(XtParent(widget)), NULL);
@@ -699,11 +707,7 @@ namespace xwin {
 
     Widget row_column = XmVaCreateManagedRowColumn(shell,"row-column", NULL);
 
-    struct {
-      String name; ///< アイテム名
-      XtCallbackProc proc; ///< コールバック
-      XtPointer closure; ///< クライアント・データに渡す値
-    } items[] = {
+    struct menu_item items[] = {
       { "none", menu_selected, },
       { "tree", tree_menu_selected, },
       { "list", list_menu_selected, },
@@ -750,6 +754,7 @@ namespace xwin {
     XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
 
     create_parts_test(top);
+    cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
 
     XtAppMainLoop(context);
     XtDestroyApplicationContext(context);
@@ -759,11 +764,261 @@ namespace xwin {
 
 };
 
+// --------------------------------------------------------------------------------
+
+namespace xwin {
+
+  /// 素朴なテキストエディタ(Motif版)
+  struct mtext_app {
+    Widget buf, dialog;
+  };
+
+  /// 選択した範囲をクリップボードに複製
+  static void copy_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XmPushButtonCallbackStruct *cs = (XmPushButtonCallbackStruct *)call_data;
+    mtext_app *app = (mtext_app *)client_data;
+    XmTextCopy(app->buf, cs->event->xbutton.time);
+    cerr << "TRACE: " << XtName(widget) << " copy selected." << endl;
+  }
+
+  /// 選択した範囲を削除して、クリップボードに複製
+  static void cut_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XmPushButtonCallbackStruct *cs = (XmPushButtonCallbackStruct *)call_data;
+    mtext_app *app = (mtext_app *)client_data;
+    XmTextCut(app->buf, cs->event->xbutton.time);
+    cerr << "TRACE: " << XtName(widget) << " cut selected." << endl;
+  }
+
+  /// カーソル位置にクリップボードの内容を複製
+  static void paste_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+    mtext_app *app = (mtext_app *)client_data;
+    XmTextPaste(app->buf);
+    cerr << "TRACE: " << XtName(widget) << " paste selected." << endl;
+  }
+
+  /// すべての要素を選択した状態にする
+  static void all_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XmAnyCallbackStruct *cs = (XmAnyCallbackStruct *)call_data;
+    mtext_app *app = (mtext_app *)client_data;
+    XmTextPosition start = 0;
+    XmTextPosition last = XmTextGetLastPosition(app->buf);
+    XmTextSetSelection(app->buf, start, last, cs->event->xbutton.time);
+    cerr << "TRACE: " << XtName(widget) << " all selected." << endl;
+  }
+
+  /// 選択された領域を入手する
+  static void get_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XmPushButtonCallbackStruct *cs = (XmPushButtonCallbackStruct *)call_data;
+    mtext_app *app = (mtext_app *)client_data;
+
+    wchar_t *wcs = XmTextGetSelectionWcs(app->buf);
+    if (!wcs) {
+      //選択されている領域がない場合は全テキストを対象とする
+      wcs =  XmTextGetStringWcs(app->buf);
+    }
+
+    if (wcs) 
+      printf("%ls\n", wcs);
+
+    XtFree((char *)wcs);
+  }
+
+  /// テキストを末尾に追加する
+  static void append_text(Widget text, const wchar_t *buf) {
+    XmTextPosition last = XmTextGetLastPosition(text);
+    XmTextReplaceWcs(text, last, last, (wchar_t *)buf);
+  }
+
+  /// テキストをカレット位置に追加する
+  static void insert_text(Widget text, const wchar_t *buf) {
+    XmTextPosition pos = XmTextGetCursorPosition(text);
+    XmTextReplaceWcs(text, pos, pos, (wchar_t *)buf);
+  }
+
+  /// テキストを置き換える
+  static void replace_text(Widget text, const wchar_t *buf) {
+    XmTextPosition last = XmTextGetLastPosition(text);
+    XmTextReplaceWcs(text, 0, last, (wchar_t *)buf);
+  }
+
+  /// 地域時間を入手する
+  static void fetch_localtime(struct tm *local) {
+    time_t now;
+
+    if (time(&now) == (time_t)-1) { perror("time"); return; }
+
+    if (!localtime_r(&now, local)) {
+      cerr << "unkown localtime." << endl;
+    }
+  }
+
+  ///　現在時刻をカレット位置に挿入する
+  static void insert_datetime_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget text = (Widget)client_data;
+
+    struct tm local;
+    fetch_localtime(&local);
+
+    char buf[200];
+    strftime(buf, sizeof buf, "%Y, %B, %d, %A %p%I:%M:%S", &local);
+    
+    size_t len = strlen(buf);
+    wchar_t wcs[len + 1];
+
+    len = mbstowcs(wcs, buf, len);
+    if (len != (size_t)-1) {
+      wcs[len] = 0;
+      insert_text(text, wcs);
+    }
+  }
+
+  static void append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    mtext_app *app = (mtext_app *)client_data;
+    wchar_t buf[] = L"Hello,world\n";
+    append_text(app->buf, buf);
+  }
+
+  /// ファイルが選択された
+  static void open_file(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XmFileSelectionBoxCallbackStruct *cs = (XmFileSelectionBoxCallbackStruct *)call_data;
+    mtext_app *app = (mtext_app *)client_data;
+
+    char *filename = (char *)
+      XmStringUnparse(cs->value,
+		      XmFONTLIST_DEFAULT_TAG,
+		      XmCHARSET_TEXT,
+		      XmCHARSET_TEXT,
+		      NULL, 0, XmOUTPUT_ALL);
+
+    if (!filename || !*filename) {
+      cerr << "WARNING: No file selected." << endl;
+      XtFree(filename);
+      XtUnmanageChild(widget);
+      return;
+    }
+
+    cerr << "TRACE: Filename given: " << filename << endl;
+    wstring wtext = load_wtext(filename);
+
+    replace_text(app->buf, wtext.c_str());
+    XtFree(filename);
+    XtUnmanageChild(widget);
+  }
+
+  /// ダイアログのボタンが押されるとポップダウンする
+  static void close_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XtUnmanageChild(widget);
+  }
+
+  /// ファイルを選択してテキストを読み込む
+  static void open_file_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+
+    mtext_app *app = (mtext_app *)client_data;
+    cerr << "TRACE: " << XtName(widget) << " open file dialog selected." << endl;
+
+    if (!app->dialog) {
+      Arg args[2];
+      XtSetArg (args[0], XmNpathMode, XmPATH_MODE_RELATIVE);
+
+      Widget dialog = 
+	XmCreateFileSelectionDialog(find_shell(app->buf,0), "filesb", args, 1);
+      XtAddCallback(dialog, XmNcancelCallback, close_dialog, app);
+      XtAddCallback(dialog, XmNokCallback, open_file, app);
+      show_component_tree(XtParent(dialog));
+      app->dialog = dialog;
+    }
+
+    XtManageChild(app->dialog);
+  }
+
+  /// テキスト・エディタのメイン・ウィンドウを作成する
+  static void create_editor(Widget shell) {
+    mtext_app *app = new mtext_app();
+
+    Widget main =
+      XmVaCreateManagedMainWindow(shell,"main", NULL);
+
+    Widget bar = 
+      XmCreateMenuBar(main,"bar",0,0);
+    XtManageChild(bar);
+
+    app->buf = 
+      XmVaCreateManagedText(main, "buf", 
+			    XmNeditMode, XmMULTI_LINE_EDIT,
+			    NULL);
+
+    XtVaSetValues(main, XmNworkWindow, app->buf, NULL);
+
+    struct menu_item memo_items[] = {
+      { "new", menu_selected, app, },
+      { "open-file-dialog", open_file_dialog, app, },
+      { "get-seleted", get_selected, app, },
+      { "hello", append_hello_text_proc, app, },
+      { "now", insert_datetime_text_proc, app->buf, },
+      { "-", menu_selected, },
+      { "close", quit_application, },
+      { 0, },
+    };
+
+    struct menu_item edit_items[] = {
+      { "copy-to-cripboard", copy_selected, app, },
+      { "yank-from-cripboard", paste_selected, app, },
+      { "delete-selected", cut_selected, app, },
+      { "all-selected", all_selected, app, },
+      { 0, },
+    };
+
+    XmVaCreateManagedCascadeButton(bar, "memo",
+				   XmNsubMenuId, create_pulldown_menu("memo", bar, memo_items),
+				   NULL);
+
+    XmVaCreateManagedCascadeButton(bar, "edit",
+				   XmNsubMenuId, create_pulldown_menu("edit", bar, edit_items),
+				   NULL);
+    XtRealizeWidget(shell);
+  }
+
+  /// テキストエディタ
+  static int motif_edit(int argc, char **argv) {
+    static String app_class = "MotifTextEditor", 
+      fallback_resouces[] = { 
+      "*fontList: -*-*-*-*-*--16-*:",
+      "*buf.columns: 30",
+      "*buf.rows: 15",
+      //    "MotifTextEditor.geometry: 300x200",
+      NULL,
+    };
+
+    static XrmOptionDescRec options[] = { };
+
+    XtAppContext context;
+
+    XtSetLanguageProc(NULL, NULL, NULL);
+    Widget top = 
+      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
+			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
+    app_shell_count++;
+
+    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
+    create_editor(top);
+    cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
+
+    XtAppMainLoop(context);
+    XtDestroyApplicationContext(context);
+    cerr << "TRACE: context destroyed." << endl;
+    return 0;
+  }
+
+};
+
+// --------------------------------------------------------------------------------
+
 #include "subcmd.h"
 
 subcmd motif_cmap[] = {
   { "hello03", xwin::motif_hello,  },
   { "motif", xwin::motif_parts,  },
+  { "edit02", xwin::motif_edit,  },
   { 0 },
 };
 
