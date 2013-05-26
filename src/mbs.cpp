@@ -1,3 +1,6 @@
+/*! \File
+ * \brief マルチバイト・テキストを操作する機能を提供します
+ */
 
 #include <cerrno>
 #include <cstring>
@@ -11,195 +14,194 @@
 #include <sys/types.h>
 #include <time.h>
 
-/// マルチバイト文字コードセットを変換をサポートする
-class mbsconv {
-  std::string internalEncode, convertEncode, src, target;
-  iconv_t convertEngine;
+namespace {
 
-  mbsconv();
-  bool open(std::string src, std::string tocode);
-  void close();
+  /// マルチバイト文字コードセットを変換をサポートする
+  class mbsconv {
+    std::string internalEncode, convertEncode, src, target;
+    iconv_t convertEngine;
+    
+    mbsconv();
+    bool open(std::string src, std::string tocode);
+    void close();
+    
+    const char *lookup(const char *enc);
+    
+  public:
+    virtual ~mbsconv();
 
-  const char *lookup(const char *enc);
+    /// 変換コンバータを入手する(現在のlocale相対)
+    static mbsconv *createConvertHelper(std::string encode);
 
-public:
-  virtual ~mbsconv();
+    std::string convert(const char *target, std::string tocode, std::string fromcode);
 
-  /// 変換コンバータを入手する(現在のlocale相対)
-  static mbsconv *createConvertHelper(std::string encode);
+    /// 内部コードを指定している外部コードに変換する
+    std::string encode(std::string txt);
+    std::string encode(const char *txt);
 
-  std::string convert(const char *target, std::string tocode, std::string fromcode);
+    /// 指定している外部コードを内部コードに変換する
+    std::string decode(std::string txt);
+    std::string decode(const char *txt);
 
-  /// 内部コードを指定している外部コードに変換する
-  std::string encode(std::string txt);
-  std::string encode(const char *txt);
+    /// 内部コードのエンコードを入手する
+    std::string getInternalEncoding();
 
-  /// 指定している外部コードを内部コードに変換する
-  std::string decode(std::string txt);
-  std::string decode(const char *txt);
+    /// 変換エンコードを入手する
+    std::string getConvertEncoding();
+  };
 
-  /// 内部コードのエンコードを入手する
-  std::string getInternalEncoding();
+  using namespace std;
 
-  /// 変換エンコードを入手する
-  std::string getConvertEncoding();
-};
+  // ロケールとiconvのエンコードの対応(日本語系のみ)
+  static struct locale_iconv_tbl {
+    char *locale, *iconv;
+    locale_iconv_tbl(char *tl,char *ti) : locale(tl), iconv(ti) { }
+  } litbl[] = {
+    locale_iconv_tbl("ja_JP","EUC-JP-MS"),
+    locale_iconv_tbl("ja_JP.eucjp","EUC-JP-MS"),
+    locale_iconv_tbl("ja_JP.ujis","EUC-JP-MS"),
+    locale_iconv_tbl("ja_JP.utf8","UTF-8"),
+    locale_iconv_tbl("ja_JP.UTF-8","UTF-8"),
+    locale_iconv_tbl("ja_JP.sjis","SJIS-WIN"),
+    locale_iconv_tbl("japanese","EUC-JP-MS"),
+    locale_iconv_tbl("japanese.euc","EUC-JP-MS"),
+    locale_iconv_tbl("C","ISO_8859-1"),
+  };
 
-using namespace std;
-
-// ロケールとiconvのエンコードの対応(日本語系のみ)
-static struct locale_iconv_tbl {
-  char *locale, *iconv;
-  locale_iconv_tbl(char *tl,char *ti) : locale(tl), iconv(ti) { }
-} litbl[] = {
-  locale_iconv_tbl("ja_JP","EUC-JP-MS"),
-  locale_iconv_tbl("ja_JP.eucjp","EUC-JP-MS"),
-  locale_iconv_tbl("ja_JP.ujis","EUC-JP-MS"),
-  locale_iconv_tbl("ja_JP.utf8","UTF-8"),
-  locale_iconv_tbl("ja_JP.UTF-8","UTF-8"),
-  locale_iconv_tbl("ja_JP.sjis","SJIS-WIN"),
-  locale_iconv_tbl("japanese","EUC-JP-MS"),
-  locale_iconv_tbl("japanese.euc","EUC-JP-MS"),
-  locale_iconv_tbl("C","ISO_8859-1"),
-};
-
-/// ロケールとiconvのエンコードを対応を引く
-const char *mbsconv::lookup(const char *ctype) {
-  char *iconv = NULL;
-  for (int i = 0; i < sizeof litbl/sizeof litbl[0]; i++) {
-    if (strcasecmp(litbl[i].locale, ctype) == 0)
-      iconv = litbl[i].iconv;
-  }
-  return iconv;
-}
-
-mbsconv::mbsconv() : convertEngine(0) {
-  // ロケールの値からiconvのエンコーディング名を決定する
-  const char *ctype = setlocale(LC_CTYPE, NULL);
-  const char *iconv = lookup(ctype);
-  if (iconv == NULL) iconv = "ISO_8859-1";
-  internalEncode.assign(iconv);
-}
-
-
-mbsconv::~mbsconv() { close(); }
-
-/// エンジンのリソースの解放
-void mbsconv::close() {
-  if (!convertEngine) return;
-
-  if (!::iconv_close(convertEngine)) {
-    if (errno)
-      cerr << "WARNING: iconv_close: " << strerror(errno) << endl;
-  }
-  convertEngine = 0;
-}
-
-
-/// 新しい変換エンジンを作成する
-bool mbsconv::open(string tcode, string fromcode) {
-
-  iconv_t cd = ::iconv_open(tcode.c_str(), fromcode.c_str());
-  if (cd < 0) {
-    cerr << "ERROR: iconv_open: " << strerror(errno) << endl;
-    return false;
+  /// ロケールとiconvのエンコードを対応を引く
+  const char *mbsconv::lookup(const char *ctype) {
+    char *iconv = NULL;
+    for (int i = 0; i < sizeof litbl/sizeof litbl[0]; i++) {
+      if (strcasecmp(litbl[i].locale, ctype) == 0)
+	iconv = litbl[i].iconv;
+    }
+    return iconv;
   }
 
-  cerr << "TRACE: iconv_open: " << tcode << ":" << fromcode << endl;
-  close();
-  convertEngine = cd;
-  src = fromcode;
-  target = tcode;
-  return true;
-}
-
-
-string mbsconv::getConvertEncoding() {
-  return convertEncode;
-}
-
-string mbsconv::getInternalEncoding() {
-  return internalEncode;
-}
-
-mbsconv* mbsconv::createConvertHelper(string encode) {
-  mbsconv *ret = new mbsconv();
-  ret->convertEncode = encode;
-  return ret;
-}
-
-string mbsconv::encode(const char *txt) {
-  return convert(txt, internalEncode, convertEncode);
-}
-
-string mbsconv::encode(string txt) {
-  return convert(txt.c_str(), internalEncode, convertEncode);
-}
-
-string mbsconv::decode(const char *txt) {
-  return convert(txt, convertEncode, internalEncode);
-}
-
-string mbsconv::decode(string txt) {
-  return convert(txt.c_str(), convertEncode, internalEncode);
-}
-
-string mbsconv::convert(const char *text, string fromcode, string tocode) {
-  if (src.empty() || target.empty() || tocode != target || src != fromcode) {
-    if (!open(tocode, fromcode)) return "";
+  mbsconv::mbsconv() : convertEngine(0) {
+    // ロケールの値からiconvのエンコーディング名を決定する
+    const char *ctype = setlocale(LC_CTYPE, NULL);
+    const char *iconv = lookup(ctype);
+    if (iconv == NULL) iconv = "ISO_8859-1";
+    internalEncode.assign(iconv);
   }
 
-  string ret;
+  mbsconv::~mbsconv() { close(); }
 
-  char* psrc = const_cast<char*>(text);
-  size_t srclen = strlen(text);
+  /// エンジンのリソースの解放
+  void mbsconv::close() {
+    if (!convertEngine) return;
 
-  char* dst = new char[srclen + 1];
-  char* pdst = dst;
-  size_t dstlen = srclen;
-  size_t dstmax = srclen;
+    if (!::iconv_close(convertEngine)) {
+      if (errno)
+	cerr << "WARNING: iconv_close: " << strerror(errno) << endl;
+    }
+    convertEngine = 0;
+  }
 
-  while (srclen > 0) {
-    char* psrc_org = psrc;
+  /// 新しい変換エンジンを作成する
+  bool mbsconv::open(string tcode, string fromcode) {
 
-    size_t n = ::iconv(convertEngine, &psrc, &srclen, &pdst, &dstlen);
-    if ((n != (size_t)-1 && srclen == 0) || (errno == EINVAL)) {
-      srclen = 0;
+    iconv_t cd = ::iconv_open(tcode.c_str(), fromcode.c_str());
+    if (cd < 0) {
+      cerr << "ERROR: iconv_open: " << strerror(errno) << endl;
+      return false;
+    }
+
+    cerr << "TRACE: iconv_open: " << tcode << ":" << fromcode << endl;
+    close();
+    convertEngine = cd;
+    src = fromcode;
+    target = tcode;
+    return true;
+  }
+
+  string mbsconv::getConvertEncoding() {
+    return convertEncode;
+  }
+
+  string mbsconv::getInternalEncoding() {
+    return internalEncode;
+  }
+
+  mbsconv* mbsconv::createConvertHelper(string encode) {
+    mbsconv *ret = new mbsconv();
+    ret->convertEncode = encode;
+    return ret;
+  }
+
+  string mbsconv::encode(const char *txt) {
+    return convert(txt, internalEncode, convertEncode);
+  }
+
+  string mbsconv::encode(string txt) {
+    return convert(txt.c_str(), internalEncode, convertEncode);
+  }
+
+  string mbsconv::decode(const char *txt) {
+    return convert(txt, convertEncode, internalEncode);
+  }
+
+  string mbsconv::decode(string txt) {
+    return convert(txt.c_str(), convertEncode, internalEncode);
+  }
+
+  string mbsconv::convert(const char *text, string fromcode, string tocode) {
+    if (src.empty() || target.empty() || tocode != target || src != fromcode) {
+      if (!open(tocode, fromcode)) return "";
+    }
+
+    string ret;
+    char* psrc = const_cast<char*>(text);
+    size_t srclen = strlen(text);
+
+    char* dst = new char[srclen + 1];
+    char* pdst = dst;
+    size_t dstlen = srclen;
+    size_t dstmax = srclen;
+
+    while (srclen > 0) {
+      char* psrc_org = psrc;
+
+      size_t n = ::iconv(convertEngine, &psrc, &srclen, &pdst, &dstlen);
+      if ((n != (size_t)-1 && srclen == 0) || (errno == EINVAL)) {
+	srclen = 0;
+	ret.append(dst, 0, dstmax-dstlen);
+      }
+      else {
+	switch (errno) {
+	case E2BIG:
+	  ret.append(dst, 0, dstmax-dstlen);
+	  pdst = dst;
+	  dstlen = dstmax;
+	  break;
+	case EILSEQ:
+	  ret.append(dst, 0, dstmax-dstlen);
+	  ret.append(psrc, 0, 1);
+	  psrc++;  srclen--;
+	  pdst = dst;
+	  dstlen = dstmax;
+	  break;
+	default:
+	  ret.append(psrc_org);
+	  srclen = 0;
+	  break;
+	}
+	errno = 0;
+      }
+    }
+    pdst = dst;
+    dstlen = dstmax;
+
+    if (::iconv(convertEngine, NULL, NULL, &pdst, &dstlen) != (size_t)-1) {
       ret.append(dst, 0, dstmax-dstlen);
     }
-    else {
-      switch (errno) {
-      case E2BIG:
-        ret.append(dst, 0, dstmax-dstlen);
-        pdst = dst;
-        dstlen = dstmax;
-        break;
-      case EILSEQ:
-        ret.append(dst, 0, dstmax-dstlen);
-        ret.append(psrc, 0, 1);
-        psrc++;  srclen--;
-        pdst = dst;
-        dstlen = dstmax;
-        break;
-      default:
-        ret.append(psrc_org);
-        srclen = 0;
-        break;
-      }
-      errno = 0;
-    }
-  }
-  pdst = dst;
-  dstlen = dstmax;
 
-  if (::iconv(convertEngine, NULL, NULL, &pdst, &dstlen) != (size_t)-1) {
-    ret.append(dst, 0, dstmax-dstlen);
+    delete [] dst;
+    return ret;
   }
 
-  delete [] dst;
-  return ret;
-}
-
+};
 
 /// iconvを使った変換モジュールの振る舞いの確認
 
