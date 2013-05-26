@@ -1,7 +1,129 @@
+/*! \file
+ * \brief C++の端末制御のサンプルコード
+ */
+
+#include <cstdio>
+#include <cstring>
+#include <ncurses.h>
+#include <string>
+#include <sys/ioctl.h>
+#include <vector>
+
+using namespace std;
+
+namespace term {
+
+  /// 端末の行数、カラム数を入手する
+  bool get_screen_size(int fd, int *LINES, int *COLUMNS) {
+    struct winsize size;
+    int rc = ioctl(fd, TIOCGWINSZ, &size);
+    if (rc == 0) {
+      if (LINES) *LINES = size.ws_row;
+      if (COLUMNS) *COLUMNS = size.ws_col;
+      return true;
+    }
+    return false;
+  }
+
+  /// エントリの文字幅からカラムのステップ数を計算する
+  static int calc_column_step(vector<string> &enties, int &columns, int &width) {
+    width = 1;
+
+    vector<string>::iterator it = enties.begin();
+    while( it != enties.end() ) {
+      int len = strlen((*it).c_str());
+      if (len > width) width = len;
+      it++;
+    }
+
+    int rows = 24, cols = 80;
+    get_screen_size(2, &rows, &cols);
+
+    columns = cols / ++width;
+    if (!columns) columns = 1;
+
+    return enties.size() / columns + 1;
+  }
+
+  /// エントリをカラム表示する
+  static void show_column_entries(vector<string> &enties, FILE *fp, bool sort_flag) {
+    if (sort_flag)
+      sort( enties.begin(), enties.end() );
+
+    int cols, width, step = calc_column_step(enties,cols,width);
+  
+    for (int i = 0; i < step; i++) {
+      int idx = i;
+      for (int j = 0; j < cols; j++, idx += step) {
+	if (idx >= enties.size()) continue;
+	fprintf(fp, "%s%*s", enties[idx].c_str(), width - enties[idx].size(), " ");
+      }
+      putc('\n', fp);
+    }
+  }
+
+  /// 端末のカラム数に併せてリストを表示する
+  void show_column_entries(const char **names, FILE *fp, bool sort_flag = false) {
+    vector<string> enties;
+    while (*names) {
+      enties.push_back(string(*names));
+      names++;
+    }
+    show_column_entries(enties, fp, sort_flag);
+  }
+
+};
+
+
+
+/// curses を使ったサンプルコード
+static int cur_sample01(int argc,char **argv) {
+  /*
+   * 日本語テキストを扱うために
+   * ncursesの場合は libcursesw をリンクします。
+   */
+
+  char *lang = "";
+  
+  setlocale(LC_ALL, lang);
+
+  initscr();
+  noecho();
+  cbreak();
+
+  WINDOW *win = newwin(LINES,COLS-1,0,0);
+
+  box(win,'|','-');
+
+  mvwaddstr(win,1,3,"SAMPLE PROGRAM");
+  mvwaddstr(win,3,3,"    CODE :");
+  mvwaddstr(win,5,3,"   HITKEY:");
+  mvwaddstr(win,7,3,"   END:ESC");
+
+  mvwaddstr(win,10,3,"あああいいいううう");
+
+  int ch;
+  while((ch = wgetch(win)) != 0x1b){
+	char buff[36];
+
+	sprintf(buff,"%02X",ch);
+
+	mvwaddstr(win,3,14,buff);
+	mvwaddch(win,5,14,ch);
+	wrefresh(win);
+  }
+
+  wclear(win);
+  wrefresh(win);
+  endwin();
+
+  return 0;
+}
 
 #include "subcmd.h"
 
 subcmd term_cmap[] = {
+  { "cur", cur_sample01, },
   { 0 },
 };
 

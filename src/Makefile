@@ -11,6 +11,7 @@ LDFLAGS += -lpthread
 LDFLAGS += -lXm -lMrm -lUil
 LDFLAGS += -lXaw
 LDFLAGS += -lXt -lXmu -lX11 -lSM -lICE 
+LDFLAGS += -lncursesw
 
 VERSION=0.1
 RPMBASE=~/rpm/SOURCES
