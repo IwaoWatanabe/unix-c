@@ -46,6 +46,8 @@ XawTextPosition XawTextLastPosition(Widget textw) {
 
 using namespace std;
 
+extern std::wstring load_wtext(const char *path, const char *encoding = "UTF-8", time_t *lastmod = 0, size_t buf_len = 4096);
+
 namespace xwin {
 
   /// ディレクトリ・エントリを入手する
@@ -79,5 +81,12 @@ namespace xwin {
     return a;
   }
 
+  /// ワイドキャラクタでファイルを読込む
+  wstring load_wtext(const char *path, size_t buf_len = 4096) {
+    cerr << "TRACE: loading wstring: " << path << endl;
+    return ::load_wtext(path, "UTF-8", 0, buf_len);
+  }
+
 };
+
 

@@ -6,6 +6,7 @@
 #include <string>
 #include <cstring>
 #include <cctype>
+#include <clocale>
 #include <time.h>
 #include <vector>
 #include <map>
@@ -944,6 +945,566 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
+namespace xwin {
+
+  /// テキスト・エディタの構成要素を格納
+  struct text_app : xt00 {
+    /// GUIパーツ
+    Widget buf, status;
+
+    /// 物理行移動のためのダイアログ
+    Widget goto_line_dialog;
+
+    /// 時刻表示のタイマー
+    XtIntervalId timer;
+    /// 時刻表示のインターバル
+    long interval; // ms
+
+    XtIntervalId position_timer;
+    long position_interval; // ms
+
+    XawTextPositionInfo save_pos;
+
+    text_app() : goto_line_dialog(None),timer(0),interval(1000),
+		 position_timer(0), position_interval(600) { }
+
+    void create_contents(Widget top);
+  };
+
+  /// 地域時間を入手する
+  static void fetch_localtime(struct tm *local) {
+    time_t now;
+    if (time(&now) == (time_t)-1) { perror("time"); return; }
+    if (!localtime_r(&now, local)) {
+      cerr << "unkown localtime." << endl;
+    }
+  }
+  
+  /// 現在時刻の表示
+  static void show_time_proc(XtPointer closure, XtIntervalId *id) {
+    text_app *app = (text_app *)closure;
+
+    struct tm local;
+    fetch_localtime(&local);
+
+    char buf[200];
+    strftime(buf, sizeof buf, "%Y, %B, %d, %A %p%I:%M:%S", &local);
+    strftime(buf, sizeof buf, "%p %I:%M", &local);
+    XtVaSetValues(app->status, XtNstring, XtNewString(buf), NULL);
+
+    // 再開するために再登録
+    app->timer = 
+      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
+		      app->interval, show_time_proc, app);
+  }
+
+  /// メニューの表示位置を調整する
+  static void PositionMenu(Widget w, XPoint *loc) {
+    Arg arglist[2];
+    Cardinal num_args = 0;
+
+    XtRealizeWidget(w);
+    
+    XtSetArg(arglist[num_args], XtNx, loc->x); num_args++;
+    XtSetArg(arglist[num_args], XtNy, loc->y); num_args++;
+    XtSetValues(w, arglist, num_args);
+  }
+
+  /// ポップアップ・メニューの表示
+  static void popup_action(Widget w, XEvent *event, String *params, Cardinal *num) {
+    cerr << "TRACE: " << XtName(w) << ":popup." << endl;
+
+    Widget menu;
+    XPoint loc;
+
+    if (*num != 1) {
+      XtAppWarning(XtWidgetToApplicationContext(w),
+		   "SimpleMenuWidget: position menu action expects "
+		   "only one parameter which is the name of the menu.");
+      return;
+    }
+  
+    if ((menu = find_menu(w, params[0])) == NULL) {
+      char error_buf[BUFSIZ];
+    
+      snprintf(error_buf, sizeof(error_buf),
+	       "SimpleMenuWidget: could not find menu named %s.",
+	       params[0]);
+      XtAppWarning(XtWidgetToApplicationContext(w), error_buf);
+      return;
+    }
+  
+    Boolean spring_loaded = False;
+    switch (event->type) {
+    case ButtonPress:
+      spring_loaded = True;
+    case ButtonRelease:
+      loc.x = event->xbutton.x_root;
+      loc.y = event->xbutton.y_root;
+      PositionMenu(menu, &loc);
+      break;
+    case EnterNotify:
+    case LeaveNotify:
+      loc.x = event->xcrossing.x_root;
+      loc.y = event->xcrossing.y_root;
+      PositionMenu(menu, &loc);
+      break;
+    case MotionNotify:
+      loc.x = event->xmotion.x_root;
+      loc.y = event->xmotion.y_root;
+      PositionMenu(menu, &loc);
+      break;
+    default:
+      PositionMenu(menu, NULL);
+      break;
+    }
+#if 0
+    XtMenuPopupAction(w,event,params,num);
+#else
+    if (spring_loaded)
+      XtPopupSpringLoaded(menu);
+    else
+      XtPopup(menu, XtGrabNonexclusive);
+#endif
+  }
+
+  extern wstring load_wtext(const char *path, size_t buf_len = 4096);
+
+  /// 選択された領域のテキストを入手する
+  static wstring fetch_selected_text(Widget textw) {
+    XawTextPosition begin_pos, end_pos;
+
+    XawTextGetSelectionPos(textw, &begin_pos, &end_pos);
+    if (begin_pos == end_pos) return L"";
+
+    XawTextBlock text;
+    XawTextPosition pos = XawTextSourceRead(XawTextGetSource(textw), begin_pos, &text, end_pos - begin_pos);
+
+#if 1
+    cerr << "begin:" << begin_pos << endl;
+    cerr << "end:" << end_pos << endl << endl;
+    cerr << "pos:" << pos << endl << endl;
+    cerr << "first:" << text.firstPos << endl;
+    cerr << "length:" << text.length << endl;
+    cerr << "format:" << text.format << endl;
+#endif
+
+    if (text.format == XawFmtWide) {
+      // ワイド文字で返って来るようだ
+#if 0
+      cerr << "format: wide" << endl;
+#endif
+      wstring wstr(((wchar_t *)text.ptr), text.length);
+      return wstr;
+    }
+    return L"";
+  }
+
+  /// メニューでテキスト抽出の指令を受け取った時の処理
+  static void fetch_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    text_app *app = (text_app *)client_data;
+
+    cout << XtName(app->buf) << " selected" << endl;
+
+    XawTextPosition begin_pos, end_pos;
+    XawTextGetSelectionPos(app->buf, &begin_pos, &end_pos);
+    if (begin_pos == end_pos) {
+      String text;
+      XtVaGetValues(app->buf, XtNstring, &text, NULL );
+      cout << text << endl << flush;
+      return;
+    }
+#if 1  
+    wstring wstr = fetch_selected_text(app->buf);
+    printf("%ls\n", wstr.c_str());
+    fflush(stdout);
+#else
+    XawTextBlock text;
+    XawTextPosition pos = XawTextSourceRead(XawTextGetSource(app->buf), begin_pos, &text, end_pos - begin_pos);
+
+    cerr << "begin:" << begin_pos << endl;
+    cerr << "end:" << end_pos << endl << endl;
+    cerr << "pos:" << pos << endl << endl;
+
+    cerr << "first:" << text.firstPos << endl;
+    cerr << "length:" << text.length << endl;
+    cerr << "format:" << text.format << endl;
+
+    if (text.format == XawFmtWide) {
+      cerr << "format: wide" << endl;
+      wstring wstr(((wchar_t *)text.ptr), text.length);
+      printf("%ls\n", wstr.c_str());
+    }
+    else {
+      string mbstr(text.ptr + text.firstPos, text.length);
+      printf("%s\n", mbstr.c_str());
+    }
+#endif
+  }
+
+  /// すべてのテキストを選択(セレクションには入れない)
+  static void select_all_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    text_app *app = (text_app *)client_data;
+    XawTextPosition last = XawTextLastPosition(app->buf);
+    XawTextSetSelection(app->buf,0,last);
+  }
+
+  /// 選択テキストを置き換える
+  static void replace_text(Widget text, wchar_t *buf, size_t len) {
+    XawTextPosition begin_pos, end_pos;
+    XawTextGetSelectionPos(text, &begin_pos, &end_pos);
+    XawTextBlock block;
+    block.firstPos = 0;
+    block.length = len;
+    block.ptr = (char *)buf;
+    block.format = XawFmtWide;
+    int rc = XawTextReplace(text, begin_pos, end_pos, &block);
+    cerr << "TRACE: aw replace selection: " << rc << endl;
+  }
+
+  /// 選択テキストを削除する
+  static void delete_selection_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    text_app *app = (text_app *)client_data;
+
+    replace_text(app->buf, L"", 0) ;
+    cerr << "TRACE: aw delete selection: " << endl;
+  }
+
+  /// テキストを末尾に追加する
+  static void append_text(Widget text, const wchar_t *buf, size_t len) {
+    XawTextPosition last = XawTextLastPosition(text);
+    XawTextBlock block;
+    block.firstPos = 0;
+    block.length = len;
+    block.ptr = (char *)buf;
+    block.format = XawFmtWide;
+    int rc = XawTextReplace(text, last, last, &block);
+    cerr << "TRACE: aw append: " << rc << endl;
+    XawTextSetInsertionPoint(text, last + len);
+  }
+
+  /// テキストをカレット位置に追加する
+  static void insert_text(Widget text, wchar_t *buf, size_t len) {
+    XawTextPosition pos = XawTextGetInsertionPoint(text);
+    XawTextBlock block;
+    block.firstPos = 0;
+    block.length = len;
+    block.ptr = (char *)buf;
+    block.format = XawFmtWide;
+    int rc = XawTextReplace(text, pos, pos, &block);
+    cerr << "TRACE: aw insert: " << rc << endl;
+    XawTextSetInsertionPoint(text, pos + len);
+  }
+
+  ///　現在時刻をカレット位置に挿入する
+  static void insert_datetime_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget text = (Widget)client_data;
+
+    struct tm local;
+    fetch_localtime(&local);
+
+    char buf[200];
+    strftime(buf, sizeof buf, "%Y, %B, %d, %A %p%I:%M:%S", &local);
+
+    size_t len = strlen(buf);
+    wchar_t wcs[len + 1];
+    len = mbstowcs(wcs, buf, len);
+    if (len != (size_t)-1) insert_text(text, wcs, len);
+  }
+
+  static void append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    text_app *app = (text_app *)client_data;
+    wchar_t buf[] = L"Hello,world\n";
+    append_text(app->buf, buf, wcslen(buf));
+  }
+
+  /// ダイアログテキストを初期化する
+  static void clear_dialog_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget dialog = (Widget )client_data;
+    XtVaSetValues(dialog, XtNvalue, XtNewString(""), NULL);
+  }
+
+  /// テキストの物理行移動
+  static void goto_line_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    text_app *app = (text_app *)client_data;
+    const char *value = XawDialogGetValueString(app->goto_line_dialog);
+
+    int lineno = atoi(value);
+    cerr << "TRACE: #goto_line_text_proc called:" << lineno << endl;
+
+    // TODO: 移動する方法を探して実装する
+  }
+
+  /// テキストの物理行移動のダイアログ表示
+  static void open_goto_list_dialog_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    text_app *app = (text_app *)client_data;
+
+    if (!app->goto_line_dialog) {
+      Widget shell = 
+	XtVaCreatePopupShell("goto-line", transientShellWidgetClass, find_shell(widget, 0), NULL );
+
+      Widget dialog = app->goto_line_dialog = 
+	XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, 
+				XtNvalue, XtNewString(""), NULL );
+
+      /* ウィジット関数によってダイアログ内部のボタンをセットする */
+      XawDialogAddButton(dialog, "jump", goto_line_text_proc, app );
+      XawDialogAddButton(dialog, "clear", clear_dialog_text_proc, dialog );
+      XawDialogAddButton(dialog, "cancel", close_dialog, shell );
+
+      Widget value = XtNameToWidget(dialog, "value");
+
+      install_accelerators(dialog, "jump");
+      install_accelerators(dialog, "cancel");
+
+      install_accelerators(value, "jump");
+      install_accelerators(value, "cancel");
+
+      XtVaSetValues(dialog, XtNlabel, XtNewString("line number:"), NULL);
+    }
+
+    XtVaSetValues(app->goto_line_dialog, XtNvalue, XtNewString(""), NULL);
+
+    // モーダルダイアログ（ただし他のウィンドウとは非排他的)
+    popup_dialog(widget, find_shell(app->goto_line_dialog,0), XtGrabNonexclusive);
+  }
+
+  /// 現在カーソル位置の表示
+  static void show_potision_proc(XtPointer closure, XtIntervalId *id) {
+    text_app *app = (text_app *)closure;
+    app->position_timer = 0;
+    cerr << "Line: " << app->save_pos.line_number <<
+      " Column: " << (app->save_pos.column_number + 1) << "     \r";
+  }
+
+  /// テキスト位置が変化したタイミングで呼び出される
+  static void position_callback(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XawTextPositionInfo *pos = (XawTextPositionInfo *)call_data;
+    text_app *app = (text_app *)client_data;
+
+    if (0)
+      cerr << XtName(widget) << " position callback" << endl;
+
+    app->save_pos = *pos;
+    if (app->position_timer)
+      XtRemoveTimeOut(app->position_timer);
+
+    app->position_timer = 
+      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
+		      app->position_interval, show_potision_proc, app);
+  }
+
+  void text_app::create_contents(Widget top) {
+    Widget pane = 
+      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
+    Widget menu_bar = 
+      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
+
+    XtVaCreateManagedWidget("memo", menuButtonWidgetClass, menu_bar, 
+			    XtNmenuName, "memo-menu", 
+			    NULL);
+    buf = 
+      XtVaCreateManagedWidget("buf", asciiTextWidgetClass, pane, 
+			      XtNeditType, XawtextEdit, 
+			      XtNtype, XawAsciiString,
+			      XtNwrap, XawtextWrapWord,
+			      XtNscrollVertical, XawtextScrollWhenNeeded, // or XawtextScrollAlways,
+			      NULL);
+
+    XtAddCallback(buf, XtNpositionCallback, position_callback, this);
+
+    Widget close = 
+      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
+    XtAddCallback(close, XtNcallback, quit_application, 0);
+    XtInstallAccelerators(buf, close);
+
+    struct menu_item submenu[] = {
+      { "item1", menu_selected, },
+      { "item2", menu_selected, },
+      { "item3", menu_selected, },
+      { 0, },
+    };
+
+    //create_popup_menu("memo-submenu", top, submenu);
+
+    struct menu_item items[] = {
+      { "select-all", select_all_text_proc, this, },
+      { "delete-selection", delete_selection_text_proc, this, },
+      { "hello", append_hello_text_proc, this, },
+      { "fetch-text", fetch_text_proc, this, },
+      { "now", insert_datetime_text_proc, buf, },
+      { "goto-line", open_goto_list_dialog_proc, this, },
+      { "sub-menu", 0, 0, submenu },
+      { "-", },
+      { "close", quit_application, },
+      { 0, },
+    };
+
+    create_popup_menu("memo-menu", top, items);
+
+    struct menu_item shortcut_item[] = {
+      { "aaa", menu_selected, },
+      { "bbb", menu_selected, },
+      { "fetch-text", fetch_text_proc, this, },
+      { "sub-menu", 0, 0, submenu },
+      { "-", },
+      { "close", quit_application, },
+      { 0, },
+    };
+
+    create_popup_menu("text-shortcut", top, shortcut_item);
+
+#if 1
+    status = 
+      XtVaCreateManagedWidget("status", asciiTextWidgetClass, pane, 
+			      XtNscrollHorizontal, XawtextScrollNever,
+			      XtNdisplayCaret, False,
+			      XtNskipAdjust, True, NULL);
+#endif
+
+    XtRealizeWidget(top);
+    show_component_tree(top);
+
+    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
+
+    XtAddEventHandler(top, NoEventMask, True, dispose_handler, 0);
+    XSetWMProtocols(XtDisplay(top), XtWindow(top), &WM_DELETE_WINDOW, 1 );
+
+    XtAddCallback(top, XtNdestroyCallback, delete_app_proc, this);
+  }
+
+  /// 処理するイベントがなくなった時に呼び出される
+  static Boolean text_ready(XtPointer closure) {
+    text_app *app = (text_app *)closure;
+
+    cerr << "TRACE: work proc called" << endl;
+
+    wstring wtext = load_wtext(__FILE__);
+
+    append_text(app->buf, wtext.c_str(), wtext.size());
+
+    // 時刻表示のタイマーを登録
+    app->timer = 
+      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
+		      app->interval, show_time_proc, app);
+    return True;
+  }
+
+  /** 簡易テキストエディタ。
+      ボタンを組み合わせたメニュー付き。
+  */
+  static int awt_editor(int argc, char **argv) {
+
+    static String app_class = "AwText", 
+      fallback_resouces[] = { 
+      "*international: True",
+      "*inputMethod: kinput2",
+      "*fontSet: -*-*-*-*-*--24-*",
+      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "*preeditType: OverTheSpot,OffTheSpot,Root",
+      "*cursorColor: red",
+
+      "*buf.width: 500",
+      "*buf.height: 300",
+      "*buf.textSource.enableUndo: True",
+      "*sub-menu.menuName: memo-submenu",
+
+      "*Text.translations: #override "
+      "Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
+      "Ctrl<Key>Right: forward-word()\\n"
+      "Ctrl<Key>Left: backward-word()\\n"
+      "Ctrl<Key>space: select-start()\\n"
+      "Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
+      "<Key>Home: beginning-of-file()\\n"
+      "<Key>End: end-of-file()\\n"
+      "<Key>Next: next-page()\\n"
+      "<Key>Prior: previous-page()\\n",
+
+      "*buf.translations: #override "
+      " Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
+      " Ctrl<Key>Right: forward-word()\\n"
+      " Ctrl<Key>Left: backward-word()\\n"
+      " Ctrl<Key>space: select-start()\\n"
+      " Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
+      " <Key>Home: beginning-of-file()\\n"
+      " <Key>End: end-of-file()\\n"
+      " <Key>Next: next-page()\\n"
+      " <Key>Prior: previous-page()\\n"
+      " Shift<Btn4Down>,<Btn4Up>: scroll-one-line-down()\\n"
+      " Shift<Btn5Down>,<Btn5Up>: scroll-one-line-up()\\n"
+      " Ctrl<Btn4Down>,<Btn4Up>: previous-page()\\n"
+      " Ctrl<Btn5Down>,<Btn5Up>: next-page()\\n"
+      " <Btn4Down>,<Btn4Up>:scroll-one-line-down()scroll-one-line-down()scroll-one-line-down()"
+        "scroll-one-line-down()scroll-one-line-down()\\n"
+      " <Btn5Down>,<Btn5Up>:scroll-one-line-up()scroll-one-line-up()scroll-one-line-up()"
+        "scroll-one-line-up()scroll-one-line-up()\\n"
+      " Ctrl<Key>F2: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      " Ctrl<Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      " Ctrl<Btn3Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      ,
+#if 0
+      " <Btn3Down>: XawPositionSimpleMenu(text-shortcut) MenuPopup(text-shortcut)\\n"
+      " !Ctrl <Btn3Down>: XawPositionSimpleMenu(text-shortcut) MenuPopup(text-shortcut)\\n"
+      " !Lock Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+#else
+      "*menu_bar.translations: #override "
+      " <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+      " Ctrl <Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      " Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+      " !Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+      " !Lock Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+#endif
+      ,
+      "*.jump.accelerators: <KeyPress>Return: set() notify() unset()\\n",
+      "*.cancel.accelerators: <KeyPress>Escape: set() notify() unset()\\n",
+      "*.close.accelerators: #override Ctrl<KeyPress>w: set() notify() unset()\\n",
+      NULL,
+    };
+
+    XtActionsRec actions[] = {
+      { "popup-shortcut", popup_action, },
+    };
+    XtAppContext context;
+    XtSetLanguageProc(NULL, NULL, NULL);
+
+    Widget top = 
+      XtVaAppInitialize(&context, app_class, NULL, 0,
+			&argc, argv, fallback_resouces, NULL);
+
+    XawSimpleMenuAddGlobalActions(context);
+
+    XtRegisterGrabAction(popup_action, True, 
+			 ButtonPressMask | ButtonReleaseMask ,
+			 GrabModeAsync, GrabModeAsync);
+
+    XtAppAddActions(context, actions, XtNumber(actions));
+    xatom_initialize(XtDisplay(top));
+    text_app *app = new text_app;
+    app->create_contents(top);
+
+    XtWorkProcId work = XtAppAddWorkProc(context, text_ready, app);
+    cerr << "TRACE: ready proc: " << app << ":" << work << endl;
+    cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
+    return app->main_loop(context);
+  }
+
+};
+
+/*
+  Xlibがサポートするロケールと libcがサポートするロケールが合致していないと
+  エディタはうまく動作しない。
+
+  CentOS5.x で提供される ja_JP.utf8 はXlibがサポートしていない。
+  一見動作しているようだが、処理中に バッファオーバフローが検出されて停止してしまう。
+
+  この問題を回避するために
+  # localedef -f EUC-JP -i ja_JP /usr/lib/locale/ja_JP.eucJP
+  として、ja_JP.eucJP を定義して、これを利用する必要がある。
+  
+ */
+
+// --------------------------------------------------------------------------------
+
 #include "subcmd.h"
 
 subcmd awt_cmap[] = {
@@ -955,6 +1516,7 @@ subcmd awt_cmap[] = {
   { "dialog02", xwin::awt_dialog02, },
   { "tree", xwin::awt_class_tree, },
   { "list", xwin::awt_list, },
+  { "edit", xwin::awt_editor, },
   { 0 },
 };
 
