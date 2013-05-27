@@ -19,8 +19,6 @@
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
 
-#include "subcmd.h"
-
 using namespace std;
 
 /// ウィンドウだけ表示する簡単な例
@@ -54,8 +52,9 @@ static int simple_window(int argc,char **argv) {
     配置位置や大きさはリクエスト通りにはならないこともある。
     生成した直後は非表示状態なので、あとで XMapWindow　を使って表示状態にする。
    */
-  
-  XSelectInput(display, window, ButtonPressMask|KeyPressMask);
+
+  unsigned long event_mask = ButtonPressMask|KeyPressMask;
+  XSelectInput(display, window, event_mask);
   /*
     受け入れるイベントを設定する。
     この例では、マウスのボタンとキーボードの押下を検出する。
@@ -88,6 +87,9 @@ static int simple_window(int argc,char **argv) {
 
   return 0;
 }
+
+// --------------------------------------------------------------------------------
+// 先のコードをC++スタイルで記述したもの
 
 namespace xwin {
 
@@ -138,9 +140,21 @@ namespace xwin {
     window = 
       XCreateSimpleWindow(display, parent, x, y, width, height, 
 			  border_width, border_color, background);
+    /*
+      ウィンドウを作成する。
+      これで指定していない、その他のウィンドウ属性は親から引き継ぐ。
+      ルートの配置するトップレベルウィンドウの場合は、
+      ウィンドウマネージャの介入が入って、
+      配置位置や大きさはリクエスト通りにはならないこともある。
+      生成した直後は非表示状態なので、あとで XMapWindow　を使って表示状態にする。
+    */
 
     unsigned long event_mask = ButtonPressMask|KeyPressMask;
     XSelectInput(display, window, event_mask);
+    /*
+      受け入れるイベントを設定する。
+      この例では、マウスのボタンとキーボードの押下を検出する。
+    */
   }
 
   /// イベントループ
@@ -148,6 +162,10 @@ namespace xwin {
   xlib01::event_loop()
   {
     XMapWindow(display, window);
+    /*
+      表示状態にする。
+      このタイミングでウィンドウマネージャの介入が入る。
+    */
 
     XEvent event;
     int exit_flag = 0;
@@ -170,19 +188,20 @@ namespace xwin {
     cerr << "#dispose called." << endl;
   }
 
+  /// C++スタイル で作成した Simple Window
+  static int
+  simple_window02(int argc,char **argv) {
+    xwin::xlib01 *app = new xwin::xlib01;
+  
+    if (!app->connect_server()) return 1;
+    app->create_application_window();
+    app->event_loop();
+    app->dispose();
+    return 0;
+  }
 };
 
-/// C++ で作成した Simple Window
-static int
-simple_window02(int argc,char **argv) {
-  xwin::xlib01 *app = new xwin::xlib01;
-  
-  if (!app->connect_server()) return 1;
-  app->create_application_window();
-  app->event_loop();
-  app->dispose();
-  return 0;
-}
+// --------------------------------------------------------------------------------
 
 namespace xwin {
 
@@ -448,29 +467,32 @@ namespace xwin {
     XFreeFontSet(display, font);
     xlib01::dispose();
   }
+
+  /// テキストを表示するアプリケーション
+  static int text_list(int argc,char **argv) {
+    xwin::xlib02 *app = new xwin::xlib02;
+
+    const char *text_file = getenv("TEXT");
+    if (!text_file) text_file = __FILE__;
+
+    const char *font_name = getenv("FONT_NAME");
+    if (!font_name) font_name = "-*--14-*,-*--24-*";
+
+    if (!app->locale_initialize()) return 1;
+    if (!app->load_display_text(text_file)) return 1;
+  
+    if (!app->connect_server()) return 1;
+    if (!(app->font = app->load_font(font_name))) return 1;
+  
+    app->create_application_window();
+    app->event_loop();
+    app->dispose();
+    return 0;
+  }
+
 };
 
-/// テキストを表示するアプリケーション
-static int text_list(int argc,char **argv) {
-  xwin::xlib02 *app = new xwin::xlib02;
-
-  const char *text_file = getenv("TEXT");
-  if (!text_file) text_file = __FILE__;
-
-  const char *font_name = getenv("FONT_NAME");
-  if (!font_name) font_name = "-*--14-*,-*--24-*";
-
-  if (!app->locale_initialize()) return 1;
-  if (!app->load_display_text(text_file)) return 1;
-  
-  if (!app->connect_server()) return 1;
-  if (!(app->font = app->load_font(font_name))) return 1;
-  
-  app->create_application_window();
-  app->event_loop();
-  app->dispose();
-  return 0;
-}
+// --------------------------------------------------------------------------------
 
 namespace xwin {
 
@@ -513,7 +535,6 @@ namespace xwin {
       res = pw->pw_dir;
       return res;
     }
-  
     return res;
   }
 
@@ -698,6 +719,11 @@ namespace xwin {
 
     unsigned width, height;
     width = height = 1000;
+    XRectangle overall_ink, overall_logical;
+
+    XwcTextExtents(font, wbuf, len, &overall_ink, &overall_logical);
+    if (data_insert_pos != 0)
+      height = overall_logical.height;
     XClearArea(display, window, 0, 0, width, height, True);
 
     wcout << hex;
@@ -811,42 +837,43 @@ namespace xwin {
     xlib02::dispose();
   }
 
+  /// テキストを表示するアプリケーション
+  static int text_inputs(int argc,char **argv) {
+    xwin::xlib03 *app = new xwin::xlib03;
+
+    const char *text_file = getenv("TEXT");
+    if (!text_file) text_file = __FILE__;
+
+    const char *font_name = getenv("FONT_NAME");
+    if (!font_name) font_name = "-*--14-*,-*--24-*";
+
+    if (!app->locale_initialize()) return 1;
+    if (!app->load_display_text(text_file)) return 1;
+
+    if (!app->connect_server()) return 1;
+    if (!(app->font = app->load_font(font_name))) return 1;
+  
+    char *res_name = basename(argv[0]), *res_class = "Xlib03";
+    app->set_application_name(res_name, res_class);
+
+    app->create_application_window();
+    app->event_loop();
+    app->dispose();
+    return 0;
+  }
 };
 
+// --------------------------------------------------------------------------------
 
-/// テキストを表示するアプリケーション
-static int text_inputs(int argc,char **argv) {
-  xwin::xlib03 *app = new xwin::xlib03;
-
-  const char *text_file = getenv("TEXT");
-  if (!text_file) text_file = __FILE__;
-
-  const char *font_name = getenv("FONT_NAME");
-  if (!font_name) font_name = "-*--14-*,-*--24-*";
-
-  if (!app->locale_initialize()) return 1;
-  if (!app->load_display_text(text_file)) return 1;
-
-  if (!app->connect_server()) return 1;
-  if (!(app->font = app->load_font(font_name))) return 1;
-  
-  char *res_name = basename(argv[0]), *res_class = "Xlib03";
-  app->set_application_name(res_name, res_class);
-
-  app->create_application_window();
-  app->event_loop();
-  app->dispose();
-  return 0;
-}
-
+#include "subcmd.h"
 
 subcmd xwin_cmap[] = {
-  { "win", simple_window02, },
+  { "win", xwin::simple_window02, },
   { "win01", simple_window, },
-  { "win02", simple_window02, },
-  { "text", text_inputs, },
-  { "text01", text_list, },
-  { "text02", text_inputs, },
+  { "win02", xwin::simple_window02, },
+  { "text", xwin::text_inputs, },
+  { "text01", xwin::text_list, },
+  { "text02", xwin::text_inputs, },
   { 0 },
 };
 
