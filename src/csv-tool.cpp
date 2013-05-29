@@ -11,7 +11,7 @@ using namespace std;
 namespace {
 
   // 読み込んだデータを別のファイルに書き出す
-  class DumpCSVReader : public CSV_Reader {
+  class DumpCSVReader : public uc::CSV_Reader {
     string outfile;
     FILE *fp;
 

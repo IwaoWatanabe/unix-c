@@ -18,19 +18,21 @@ using namespace std;
 
 #include "csv.h"
 
-/// CSVを読み込み、その語の加工処理を CSV_Reader に委譲するクラスが実装するインタフェース
+namespace uc {
+  /// CSVを読み込み、その語の加工処理を CSV_Reader に委譲するクラスが実装するインタフェース
 
-class CSV_Source {
-protected:
-  /// 処理を開始する前に呼び出される
-  virtual bool begin_read_soruce() { return true; }
-  /// 処理が開始されていれば、終了あるいは中断のタイミングで呼び出される
-  virtual void end_read_soruce() { }
+  class CSV_Source {
+  protected:
+    /// 処理を開始する前に呼び出される
+    virtual bool begin_read_soruce() { return true; }
+    /// 処理が開始されていれば、終了あるいは中断のタイミングで呼び出される
+    virtual void end_read_soruce() { }
 
-public:
-  virtual ~CSV_Source() {}
-  /// 読み取りを開始する
-  virtual int perform_csv(CSV_Reader *reader) = 0;
+  public:
+    virtual ~CSV_Source() {}
+    /// 読み取りを開始する
+    virtual int perform_csv(CSV_Reader *reader) = 0;
+  };
 };
 
 namespace {
@@ -42,7 +44,7 @@ namespace {
 
      http://winter-tail.sakura.ne.jp/pukiwiki/index.php?C%A1%BFC%2B%2B%A4%A2%A4%EC%A4%B3%A4%EC%2FExcel%BB%C5%CD%CD%A4%CECSV%A5%D5%A5%A1%A5%A4%A5%EB%A4%CE%C6%C9%A4%DF%B9%FE%A4%DF%A4%C8%C9%BD%BC%A8#
    */
-  class ExcelCSVFile_Source : public CSV_Source {
+  class ExcelCSVFile_Source : public uc::CSV_Source {
     string readfile;
     FILE *fp;
 
@@ -66,7 +68,7 @@ namespace {
       counter(0),begin_time(0) { }
 
     ~ExcelCSVFile_Source() { }
-    int perform_csv(CSV_Reader *reader);
+    int perform_csv(uc::CSV_Reader *reader);
   };
 
   int 
@@ -136,7 +138,7 @@ namespace {
   }
 
   int
-  ExcelCSVFile_Source::perform_csv(CSV_Reader *reader)
+  ExcelCSVFile_Source::perform_csv(uc::CSV_Reader *reader)
   {
     if (!begin_read_soruce()) return -1;
 
@@ -220,7 +222,7 @@ namespace {
   }
 
   /// 読み込んだデータを標準出力にパイプ区切りで出力する。
-  class EchoCSVReader : public CSV_Reader {
+  class EchoCSVReader : public uc::CSV_Reader {
     string rsep;
   public:
     EchoCSVReader(const char *sep) : rsep(sep) {}
@@ -243,8 +245,10 @@ namespace {
 
 };
 
-void load_csv(const char *fname, CSV_Reader *reader) {
-  ExcelCSVFile_Source file(fname);
-  file.perform_csv(reader);
-}
+namespace uc {
+  void load_csv(const char *fname, CSV_Reader *reader) {
+    ExcelCSVFile_Source file(fname);
+    file.perform_csv(reader);
+  }
+};
 
