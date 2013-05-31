@@ -17,7 +17,7 @@ namespace uc {
     virtual ~Simple_logger() { close_log(); } 
 
     /// ログ初期化
-    virtual void init_log(const char *logfile_name);
+    virtual bool init_log(const char *logfile_name);
     /// ログ出力
     virtual int log(const char *format, ...);
     /// ログ記録終了
@@ -33,20 +33,33 @@ namespace uc {
 using namespace std;
 
 namespace uc {
-  void
+
+  /**
+     ファイルにログを出力する準備をする。
+     ファイルの準備ができなければ、事由をエラー出力して falseを返す。
+   */
+  bool
   Simple_logger::init_log(const char *logfile_name)
   {
+    if (error_log) return true;
+
     FILE *fp = fopen(logfile_name, "a+");
     if (!fp) {
       fprintf(stderr,"ERROR: fopen %s for logging failed:(%d) %s\n",
 	      logfile_name, errno, strerror(errno));
-      return;
+      return false;
     }
     error_log = fp;
     error_logfile_name = strdup(logfile_name);
+    return true;
   }
 
   /// ログ出力
+  /**
+     printf(3)の様式したがって、メッセージをログ出力する。
+     formatの末尾に \n が含まれる場合は都度、フラッシュする。
+     出力バイト数を返す。
+   */
   int
   Simple_logger::log(const char *format, ...)
   {
@@ -69,6 +82,15 @@ namespace uc {
   }
 
   /// ログ記録中止
+  /**
+     ログの出力を終了する。
+     それまでになんらかのメッセージを出力していれば、そのバイト数をレポートする。
+
+     このメソッドを呼び出すと以後、#log を呼び出してもファイル出力は行わなくなる。
+     ただし#init_log を呼び出せば再出力できるようになる。
+
+     このメソッドは、デストラクタから自動的に呼び出される。
+   */
   void 
   Simple_logger::close_log()
   {
@@ -78,6 +100,8 @@ namespace uc {
       fprintf(stderr,"WARNING: fclose %s failed:(%d) %s\n", 
 	      error_logfile_name, errno, strerror(errno));
     }
+    error_log = 0;
+
     if (counter > 0)
       fprintf(stderr,"INFO: logger %s output %ld bytes.\n", 
 	      error_logfile_name, counter);
