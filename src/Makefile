@@ -41,6 +41,11 @@ APP03_OBJS += motif.o
 
 app03: $(APP03_OBJS)
 
+motif.o: mrmtest.uid
+
+mrmtest.uid: mrmtest.uil
+	uil -s -o $@ $<
+
 rpm: 
 	tar zcf $(RPMBASE)/$(APP_NAME)-$(VERSION).tar.gz \
  --exclude CVS --exclude .git\* --exclude \*.o \

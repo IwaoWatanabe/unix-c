@@ -1,0 +1,155 @@
+! $Id: mrmtest.uil,v 1.2 2012/11/04 13:31:58 iwao Exp $
+
+! http://pic.dhe.ibm.com/infocenter/aix/v7r1/index.jsp?topic=%2Fcom.ibm.aix.files%2Fdoc%2Faixfiles%2FUIL.htm
+
+module mrmtest01
+  version = 'v1.1'
+  names = case_sensitive
+!  character_set = XmFALLBACK_CHARSET
+  objects = { 
+	XmPushButton = gadget;
+	XmLabel = gadget;
+	XmSeparator = gadget;
+	XmToggleButton = gadget;
+  }
+
+
+value
+  aaa_text0 : compound_string("あああああああ");
+  aaa_text1 : compound_string("いいいいいいい");
+  aaa_text : compound_string("aaa");
+  aaa_list : string_table('aa','bb','cc');
+  aaa_tbl : asciz_table('aa','bb','cc');
+  aaa_yellow : color('yellow');
+  aaa_red : color('red');
+  aaa_value : 123456789;
+  aaa_value_list : integer_table(10,20,30,40);
+  aaa_reason : reason("aaa-reason");
+  aaa_font : font("aaa");
+
+value
+  aaa_green : rgb( 0, 65536, 0);
+  aaa_color : color_table( aaa_yellow='o', aaa_red='.', background color=' ');
+  aaa_icon : icon(color_table = aaa_color,
+	'              ',
+	' .....oo..... ',
+	' ....oooo.... ',
+	' ...oo..oo... ',
+	' ..oo....oo.. ',
+	' .oo......oo. ',
+	' oo........oo ',
+	' oooooooooooo ',
+	' oooooooooooo ',
+	' .....oo..... ',
+	' .....oo..... ',
+	' .....oo..... ',
+	' .....oo..... ',
+	'              ');
+ aaa_fvalue : float(0.123456789);
+ aaa_pi : single_float(3.141592);
+ aaa_bool : TRUE;
+ aaa_bool0 : FALSE;
+ aaa_help_key : keysym("F1");
+ aaa_exported : exported 123456789;
+ aaa_argument : argument('arg', any);
+
+identifier
+  app;
+
+procedure
+ quit_application;
+ app_report(any);
+ app_close(any);
+
+object
+mrmtest : XmMainWindow {
+  controls {
+    XmMenuBar menu_bar;
+    XmText buf;
+  };
+  callbacks {
+    XmNdestroyCallback = procedure app_close(app);
+  };
+};
+
+buf : XmText {
+  arguments {
+    XmNcolumns = 30;
+    XmNrows = 15;
+    XmNeditMode = XmMULTI_LINE_EDIT;
+  };
+};
+
+menu_bar : XmMenuBar {
+  arguments {
+    XmNorientation = XmHORIZONTAL;
+    XmNmenuHelpWidget = help_entry;
+  };
+  controls {
+    XmCascadeButton file_entry;
+    XmCascadeButton help_entry;
+  };
+};
+
+file_entry : XmCascadeButton {
+  arguments {
+    XmNlabelString = compound_string("File");
+    XmNmnemonic = keysym("F");
+  };
+  controls {
+    XmPulldownMenu file_menu;
+  };
+};
+
+file_menu : XmPulldownMenu {
+  controls {
+    XmPushButton new_file_btn;
+    XmPushButton open_file_btn;
+    XmSeparator {};
+    XmPushButton close_btn;
+  };
+};
+
+new_file_btn : XmPushButton { 
+  callbacks {
+    XmNactivateCallback = procedure app_report(app);
+  };
+};
+
+open_file_btn : XmPushButton { };
+
+close_btn : XmPushButton {
+  arguments {
+    XmNlabelString = compound_string("Close");
+    XmNmnemonic = keysym("C");
+    XmNaccelerator = "Ctrl<Key>w";
+    XmNacceleratorText = "Ctrl + w";
+  };
+  callbacks {
+    XmNactivateCallback = procedure quit_application;
+  };
+};
+
+help_entry : XmCascadeButton {
+  arguments {
+    XmNlabelString = compound_string("Help");
+    XmNmnemonic = keysym("H");
+  };
+  controls {
+    XmPulldownMenu help_menu;
+  };
+};
+
+help_menu : XmPulldownMenu {
+  controls {
+    XmPushButton show_contets;
+    XmSeparator {};
+    XmPushButton about_btn;
+  };
+};
+
+show_contets : XmPushButton { };
+about_btn : XmPushButton { };
+
+end module;
+

@@ -13,6 +13,7 @@
 #include <X11/Xmu/Editres.h>
 
 #include "xt-proc.h"
+#include <Mrm/MrmPublic.h>
 
 #include <Xm/CascadeB.h>
 #include <Xm/Command.h>
@@ -1013,12 +1014,136 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
+namespace xwin {
+
+  /// MRM;Motif Resource Managerを利用するサンプル・コード
+  struct mrm_app {
+    MrmHierarchy hierarchy_id;
+    Widget container;
+    MrmType mrm_class;
+  };
+
+  static const char *get_mrm_reason(Cardinal rc) {
+    switch(rc) {
+    case MrmSUCCESS: return "SUCCESS";
+    case MrmBAD_HIERARCHY: return "BAD HIERARCHY";
+    case MrmNOT_FOUND: return "NOT FOUND";
+    case MrmFAILURE: return "FAILURE";
+    }
+    return "UNKOWN";
+  }
+
+  static void mrm_report_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget dialog = (Widget)client_data;
+#if 1
+    mrm_app *app = (mrm_app *)client_data;
+    cerr << "container:" << XtName(app->container) << endl;
+#else
+    int *app = (int *)client_data;
+    cerr << "int:" << *app << endl;
+#endif
+  }
+
+  static void mrm_destroy_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
+    mrm_app *app = (mrm_app *)client_data;
+    if (app->hierarchy_id) {
+      Cardinal rc = MrmCloseHierarchy(app->hierarchy_id);
+      cerr << "TRACE: MrmCloseHierarchy:" << get_mrm_reason(rc) << endl;
+    }
+    delete app;
+    cerr << "TRACE: app released." << endl;
+  }
+
+  static int create_mrm_app(char *app_name, Widget top) {
+    static char *uid_files[] = { "mrmtest.uid", };
+    /*
+     * 「UIL File Format」をキーに検索するとUILファイルの書式が見つかる
+     */
+    mrm_app *app = new mrm_app();
+
+    MrmRegisterArg reg_list[] = {
+      { "quit_application", (XtPointer)quit_application, },
+      { "app_close", (XtPointer)mrm_destroy_proc, },
+      { "app_report", (XtPointer)mrm_report_proc, },
+      { "app", (XtPointer)app, }, // UIL のidentifierで定義している
+    };
+
+    MrmInitialize();
+    /*
+      MRMの初期化
+     */
+
+    MrmOsOpenParamPtr *ancillary_structures_list = 0;
+    Cardinal rc = 
+      MrmOpenHierarchyPerDisplay(XtDisplay(top), 
+				 XtNumber(uid_files),uid_files, 
+				 ancillary_structures_list, &app->hierarchy_id);
+    /*
+      UILファイルの読み取り
+     */
+    if (rc != MrmSUCCESS) {
+      cerr << "ERROR: MrmOpenHierarchyPerDisplay:" << get_mrm_reason(rc) << endl;
+      return 1;
+    }
+
+    rc = MrmRegisterNamesInHierarchy(app->hierarchy_id, reg_list, XtNumber(reg_list));
+    /*
+      UILの定義文字列とC関数の対応付け
+     */
+    if (rc != MrmSUCCESS) {
+      cerr << "ERROR: MrmRegisterNamesInHierarchy:" << get_mrm_reason(rc) << endl;
+      return 1;
+    }
+
+    rc = MrmFetchWidget(app->hierarchy_id, app_name, top, &app->container, &app->mrm_class);
+    /*
+      Widgetの生成
+     */
+    if (rc != MrmSUCCESS) {
+      cerr << "ERROR: MrmFetchWidget:" << app_name << ":" << get_mrm_reason(rc) << endl;
+      return 1;
+    }
+    XtManageChild(app->container);
+    XtRealizeWidget(top);
+    return 0;
+  }
+
+  static int motif_mrmtest(int argc, char **argv) {
+    static String app_class = "MRMtest", app_name = "mrmtest",
+      fallback_resouces[] = { 
+      "*fontList: -*-*-*-*-*--16-*:",
+      NULL,
+    };
+    static XrmOptionDescRec options[] = { };
+
+    XtSetLanguageProc(NULL, NULL, NULL);
+
+    XtAppContext context;
+    Widget top = 
+      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
+			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
+
+    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
+
+    int rc = create_mrm_app(app_name, top);
+    if (rc == 0) XtAppMainLoop(context);
+
+    XtDestroyApplicationContext(context);
+    cerr << "TRACE: context destroyed." << endl;
+    return 0;
+  }
+
+};
+
+// --------------------------------------------------------------------------------
+
 #include "subcmd.h"
 
 subcmd motif_cmap[] = {
   { "hello03", xwin::motif_hello,  },
   { "motif", xwin::motif_parts,  },
   { "edit02", xwin::motif_edit,  },
+  { "mrm", xwin::motif_mrmtest,  },
   { 0 },
 };
 
