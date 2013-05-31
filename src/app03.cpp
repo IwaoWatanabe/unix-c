@@ -47,6 +47,9 @@ int main(int argc, char **argv) {
   extern subcmd logger_cmap[];
   subcmd_add(logger_cmap);
 
+  extern subcmd ini_cmap[];
+  subcmd_add(ini_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }
