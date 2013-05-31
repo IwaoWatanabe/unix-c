@@ -33,6 +33,7 @@ app01: app01.o args.o
 csv-util.o csv-tool.o: csv.h
 APP03_OBJS = app03.o subcmd.o stl.o term.o temp.o csv-util.o csv-tool.o mbs.o
 APP03_OBJS += times.o logger.o ini.o
+APP03_OBJS += stdc.o
 APP03_OBJS += xwin.o 
 APP03_OBJS += xt-proc.o
 APP03_OBJS += awt.o awt-util.o SmeCascade.o

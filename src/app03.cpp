@@ -50,6 +50,9 @@ int main(int argc, char **argv) {
   extern subcmd ini_cmap[];
   subcmd_add(ini_cmap);
 
+  extern subcmd stdc_cmap[];
+  subcmd_add(stdc_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }
