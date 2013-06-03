@@ -6,3 +6,6 @@
 *.log
 *.zip
 *.gz
+*.uid
+work
+tmp
