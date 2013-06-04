@@ -79,11 +79,19 @@ static int simple_window(int argc,char **argv) {
     switch (event.type) {
     case KeyPress: case ButtonPress:
       exit_flag = 1;
+      /*
+	キーが押下されるか、ポインティング・デバイス（マウス等）の
+	ボタンが押下されたら終了する
+       */
     }
   }
 
   XDestroyWindow(display, window);
   XCloseDisplay(display);
+  /*
+    サーバにリソースを開放のリクエストを送っている。
+    プロセスが終了するなら、これらを呼び出さずとも自動的に開放される。
+   */
 
   return 0;
 }
@@ -117,7 +125,7 @@ namespace xwin {
   {
     display = XOpenDisplay(display_name);
     /*
-      Xサーバと接続する。接続できなければ NULLが返る。
+      Xサーバと接続する。一定時間経過しても接続できなければ NULLが返る。
       接続名が空テキストであれば、環境変数 $DISPLAYに設定されている値を利用する。
     */
     if (!display) {
@@ -174,6 +182,10 @@ namespace xwin {
       
       switch (event.type) {
       case KeyPress: case ButtonPress:
+	/*
+	  キーが押下されるか、ポインティング・デバイス（マウス等）の
+	  ボタンが押下されたら終了する
+	*/
 	exit_flag = 1;
       }
     }
@@ -186,6 +198,11 @@ namespace xwin {
     XDestroyWindow(display, window);
     XCloseDisplay(display);
     cerr << "#dispose called." << endl;
+    /*
+      サーバにリソースを開放のリクエストを送っている。
+      プロセスが終了するなら、これらを呼び出さずとも自動的に開放される。
+      このメソッドは、処理がここまで到達したことを認識できるように用意した。
+    */
   }
 
   /// C++スタイル で作成した Simple Window
@@ -207,6 +224,7 @@ namespace xwin {
 
   /// 行単位でテキストを操作するクラス
   class line_text {
+    // 行単位でテキストを保持する
     vector<wchar_t *>lines;
   public:
     line_text();
@@ -300,8 +318,11 @@ namespace xwin {
 
   /// テキストを表示するアプリケーション
   struct xlib02 : xlib01 {
+    /// グラフィックス描画のための様々な属性パラメータを保持する
     GC gc;
+    /// 複数のフォントを取りまとめて操作するための情報を保持する
     XFontSet font;
+    /// 表示するテキストを保持する
     line_text data;
     virtual bool load_display_text(const char *filename = __FILE__ );
     virtual bool locale_initialize(const char *lang = "");
@@ -320,6 +341,10 @@ namespace xwin {
     }
     if (!XSupportsLocale()) {
       cerr << "ERROR: unsupported locale: " << setlocale(LC_CTYPE, NULL) << endl;
+      /*
+	設置されたロケールについて、Xlibがサポートできないものであると診断した。
+	ここでは利用者にその旨をフィードバックしている。
+       */
       return false;
     }
     return true;
@@ -337,19 +362,30 @@ namespace xwin {
     if (font == NULL) {
       cerr << "ERROR: failed to create fontset:" << font_name << endl;
       return font;
+      /*
+	XCreateFontSet は指示するフォントを読込む。
+	ただし、サーバに代替フォントすら存在しなければ、NULLが返る。
+	例えば日本語を表示させたいのに、日本語フォントを一切インストールしていない場合。
+       */
     }
 
     if (missing_count) {
-      // 読み込めなかったフォントがあった
+      /*
+	指定したフォントが見つからず、代替フォントが採用された場合にここに処理が移る。
+	ここでは代替フォント名をフィードバックしている。
+      */
       cerr << "WARNING: font list missing: " << font_name << endl;
       for (int i = 0; i < missing_count; i++)
 	cerr << "\t" << missing_list[i] << endl;
       
       cerr << "default string: " << default_string << endl;
       /*
-	表示できない文字の代替文字
+	表示できない文字の代替文字をフィードバックしている。
       */
       XFreeStringList(missing_list);
+      /*
+	レポートで返されたリストは開放する必要がある。
+       */
     }
     return font;
   }
@@ -362,6 +398,12 @@ namespace xwin {
     XGCValues values;
     values.foreground = BlackPixel(display, DefaultScreen(display));
     gc = XCreateGC( display, window, GCForeground, &values);
+    /*
+      GCはWindowsの描画属性を元に作成される。
+      それと異なる値としたい場合は、作成時に調整する。
+      構造体のフィールドに値を設定して、
+      扱うフィールドをビットマスクで指示する。
+     */
 
     unsigned long event_mask = ButtonPressMask|KeyPressMask|ExposureMask;
     XSelectInput(display, window, event_mask);
@@ -418,6 +460,10 @@ namespace xwin {
   }
 
   /// Expose イベントを処理する
+  /**
+    このメソッドは、ウィンドウの露出によって呼び出される。
+    このタイミングで、保持しているテキストを描画する。
+  */
   void xlib02::process_expose(XEvent *event) {
     if (event->xexpose.window != window) return;
 
@@ -430,7 +476,11 @@ namespace xwin {
     for (n = 0; (ws = data.get_text(n)); n++) {
       len = wcslen(ws);
       if (len == 0) { ws = L" "; len = 1; }
-      
+      /*
+	 event->expose には、露出した領域の情報の詳細が格納されているが、
+	 この実装はそれを意識せず、保持しているテキストをウィンドウ全体ついて描画している。
+	 そのため、再描画効率はよくない。
+      */
       XwcTextExtents(font, ws, len, &overall_ink, &overall_logical);
 
       XwcDrawString(display, window, font, gc,
@@ -474,6 +524,10 @@ namespace xwin {
 
     const char *text_file = getenv("TEXT");
     if (!text_file) text_file = __FILE__;
+    /*
+      いくつかのパラメータはこの $TEXTのように
+      環境変数で調整できるようにしている。
+    */
 
     const char *font_name = getenv("FONT_NAME");
     if (!font_name) font_name = "-*--14-*,-*--24-*";
@@ -498,10 +552,15 @@ namespace xwin {
 
   /// テキストを表示/入力するアプリケーション
   struct xlib03 : xlib02 {
+    /// 入力メソッドの制御用
     XIM input_method;
+    /// 入力コンテキストの制御用
     XIC input_context;
+    /// ウィンドウ・マネージャとの通信用
     Atom WM_PROTOCOLS, WM_DELETE_WINDOW;
+    /// Xリソース・データベースの照会用
     XrmDatabase rmdb;
+    /// 取り込み桁位置を保持
     int data_insert_pos;
     
     xlib03() : input_method(0),input_context(0),rmdb(0),data_insert_pos(0) { }
@@ -549,13 +608,14 @@ namespace xwin {
     if (!XSetLocaleModifiers(modifier))
       cerr << "WARNING: can not set local modifiders." << endl;
 
+    // ここからXリソース・データベースの検索処理
     XrmDatabase rdb, rdbbase;
     XrmInitialize();
   
     const char *appresdir = getenv("XAPPLRESDIR");
     if (!appresdir) appresdir = getenv("XUSERFILESEARCHPATH");
     if (!appresdir) appresdir = XAPPDEFAULTS_PATH;
-  
+
     rdbbase = XrmGetStringDatabase(appresdir);
 
     string home_res = get_home_dir();
@@ -589,6 +649,8 @@ namespace xwin {
     rmdb = rdbbase;
     if (!rmdb) res_name = res_class = NULL;
 
+    // ここからXIMの接続
+
     input_method = XOpenIM(display, rmdb, res_name, res_class);
     if (!input_method) {
       cerr << "WARNING: cann not open input method." << endl;
@@ -612,6 +674,8 @@ namespace xwin {
       { XIMStatusNothing, "status-nothing", },
       { XIMStatusNone, "status-none", },
     };
+
+    /// ここから接続したXIMのサポート・レベルをフィードバックしている
 
     cerr << "INFO: supported im style below." << endl;
 
@@ -678,14 +742,15 @@ namespace xwin {
 
     XSetWMHints(display, window, &hints);
     /*
-      キーボード入力を必要とすることをウィンドウ・マネージャにに伝える
+      キーボード入力を必要とすることをウィンドウ・マネージャにに伝えている
     */
 
     WM_PROTOCOLS = XInternAtom(display, "WM_PROTOCOLS", True );
     WM_DELETE_WINDOW = XInternAtom(display, "WM_DELETE_WINDOW", True );
     XSetWMProtocols(display, window, &WM_DELETE_WINDOW, 1 );
     /*
-      ウィンドウ・マネージャに強制停止ではなく、閉じるのリクエストを送信してもらう
+      ウィンドウ・マネージャに強制停止させられるのではなく、
+      閉じるタイミングを通知してもらうよう要求している。
     */
     set_window_title("wlib03");
 
@@ -725,6 +790,11 @@ namespace xwin {
     if (data_insert_pos != 0)
       height = overall_logical.height;
     XClearArea(display, window, 0, 0, width, height, True);
+    /*
+      入力された領域だけを消去している。
+      消去されたら、イベント通知がある。
+      そのタイミングでテキストの再描画を行う。
+     */
 
     wcout << hex;
     while (*wbuf) {
@@ -733,6 +803,7 @@ namespace xwin {
     wcout << dec << endl;
   }
 
+  /// Xlibのイベント処理
   void xlib03::event_loop() {
     XMapWindow(display, window);
 
@@ -753,10 +824,21 @@ namespace xwin {
     while (!exit_flag) {
       XNextEvent(display, &event);
       if (XFilterEvent(&event,None)) continue;
+      /*
+	XIMを利用する場合にXFilterEventを呼び出す必要がある。
+	日本語テキストの入力で、まだ入力が確定していない状態においては
+	XIMのフロントエンドによりイベントが処理されるので、
+	このイベントループでの処理は不要となるため、continue している。
+       */
 
       switch (event.type) {
       case KeyPress: 
 	if (!input_context) {
+	  /*
+	    XIMに接続できなかったときは、
+	    従来からのローマ字だけの入力処理とする。
+	    ワイド文字に変換して処理を継続する。
+	   */
 	  len = XLookupString(&event.xkey, buf, buf_len, &keysym, &compose_status);
 	  size_t mblen = mbstowcs(wbuf, buf, wbuf_len);
 	  if (mblen == (size_t)-1) {
@@ -764,46 +846,56 @@ namespace xwin {
 	    continue;
 	  }
 	  insert_text(wbuf);
+	  continue;
 	}
-	else {
-	  len = 
+
+	len = 
+	  XwcLookupString(input_context,&event.xkey,
+			  wbuf,wbuf_len - 1,&keysym,&status);
+	wbuf[len] = 0;
+	/*
+	  入力確定後のテキストはワイド文字の配列で入手できる。
+	 */
+	if (status == XBufferOverflow) {
+	  /*
+	    用意したバッファいに入りきらなかった場合は
+	    必要な文字数を返却してくれているので、それで再取得する。
+	   */
+	  wchar_t *new_wbuf = (wchar_t *)realloc(wbuf, (len + 1) * sizeof (*wbuf));
+	  if (new_wbuf) {
+	    cerr << "INFO: wbuf expaned to " << (len + 1) << endl;
+	    wbuf_len = len;
+	    wbuf = new_wbuf;
 	    XwcLookupString(input_context,&event.xkey,
 			    wbuf,wbuf_len - 1,&keysym,&status);
-	  wbuf[len] = 0;
-
-	  if (status == XBufferOverflow) {
-	    wchar_t *new_wbuf = (wchar_t *)realloc(wbuf, (len + 1) * sizeof (*wbuf));
-	    if (new_wbuf) {
-	      cerr << "INFO: wbuf expaned to " << (len + 1) << endl;
-	      wbuf_len = len;
-	      wbuf = new_wbuf;
-	      XwcLookupString(input_context,&event.xkey,
-			      wbuf,wbuf_len - 1,&keysym,&status);
-	      wbuf[len] = 0;
-	    }
-	  }
-	  switch(status) {
-	  case XLookupNone: break;
-	  case XLookupKeySym: case XLookupBoth:
-	    if (keysym == XK_Delete) {
-	      cerr << "delete" << endl;
-	    }
-	    else if (keysym == XK_BackSpace) {
-	      cerr << "back space" << endl;
-	    }
-	    else if (keysym == XK_Insert && event.xkey.state & ShiftMask) {
-	      cerr << "try to get selection text" << endl;
-	    }
-	    if (status == XLookupKeySym) break;
-
-	  case XLookupChars: 
-	    insert_text(wbuf);
-	    break;
-	    
-	  default:
-	    cerr << "unkown status" << status << endl;
+	    wbuf[len] = 0;
 	  }
 	}
+
+	// 入力されたテキストの種別による分岐
+	switch(status) {
+	case XLookupNone: break;
+	case XLookupKeySym: case XLookupBoth:
+	  // テキスト入力ではなく、操作系のキーが押下された。
+	  if (keysym == XK_Delete) {
+	    cerr << "delete" << endl;
+	  }
+	  else if (keysym == XK_BackSpace) {
+	    cerr << "back space" << endl;
+	  }
+	  else if (keysym == XK_Insert && event.xkey.state & ShiftMask) {
+	    cerr << "try to get selection text" << endl;
+	  }
+	  if (status == XLookupKeySym) break;
+	  
+	case XLookupChars: 
+	  // 確定入力テキスト
+	  insert_text(wbuf);
+	  break;
+	default:
+	  cerr << "unkown status" << status << endl;
+	}
+
       case ButtonPress:
 	break;
       case Expose:
