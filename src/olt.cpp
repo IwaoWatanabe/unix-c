@@ -319,6 +319,54 @@ static int vpanel(int argc,char **argv) {
 
 // --------------------------------------------------------------------------------
 
+// テキスト編集ツールのデータ保持
+struct text_rec {
+  Frame frame;
+  Textsw text;
+};
+
+// テキスト編集ツール
+static int vtext(int argc,char **argv) {
+
+  char *domain = "messages";
+  bindtextdomain(domain, ".");
+  textdomain(domain);
+
+  xv_init(//XV_USE_LOCALE, TRUE,
+	  XV_INIT_ARGC_PTR_ARGV, &argc, argv, NULL);
+
+  text_rec *rec = new text_rec();
+
+  rec->frame = (Frame)
+    xv_create(XV_NULL, FRAME,
+	      FRAME_SHOW_HEADER, TRUE,
+	      FRAME_LABEL, "text subwindow test",
+	      FRAME_SHOW_FOOTER, TRUE,
+	      FRAME_LEFT_FOOTER, gettext("left footer"),
+	      FRAME_RIGHT_FOOTER, gettext("right footer"),
+	      NULL);
+
+  Panel panel = (Panel)
+    xv_create(rec->frame, PANEL, NULL );
+
+  rec->text = xv_create(panel, TEXTSW, 
+			WIN_IS_CLIENT_PANE,
+                	WIN_ROWS,     30,
+                	WIN_COLUMNS,  70,
+			NULL );
+
+  window_fit(panel);
+  window_fit(rec->frame);
+
+  xv_main_loop(rec->frame);
+  delete rec;
+
+  cerr << "exit main loop" << endl;
+  return 0;
+}
+
+// --------------------------------------------------------------------------------
+
 #ifdef USE_SUBCMD
 
 #include "subcmd.h"
@@ -326,6 +374,7 @@ static int vpanel(int argc,char **argv) {
 subcmd xview_cmap[] = {
   { "olt-frame", frame_only, },
   { "olt-panel", vpanel, },
+  { "olt-text", vtext, },
   { 0 },
 };
 
