@@ -35,8 +35,15 @@ int main(int argc, char **argv) {
   extern subcmd awt_cmap[];
   subcmd_add(awt_cmap);
 
+#ifdef USE_MOTIF
   extern subcmd motif_cmap[];
   subcmd_add(motif_cmap);
+#endif
+
+#ifdef USE_XVIEW
+  extern subcmd xview_cmap[];
+  subcmd_add(xview_cmap);
+#endif
 
   extern subcmd mbs_cmap[];
   subcmd_add(mbs_cmap);

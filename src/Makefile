@@ -8,7 +8,15 @@ ALL_MODULE += env01
 ALL_MODULE += app03
 
 LDFLAGS += -lpthread
+ifdef USE_MOTIF
 LDFLAGS += -lXm -lMrm -lUil
+endif
+ifdef USE_XVIEW
+CXXFLAGS += -DUSE_XVIEW
+OPENWIN_HOME=/usr/openwin
+LDFLAGS += -L$(OPENWIN_BUILD)/lib/libxview -L$(OPENWIN_BUILD)/lib/libolgx
+LDFLAGS += -L$(OPENWIN_HOME)/lib  -lxview -lolgx
+endif
 LDFLAGS += -lXaw
 LDFLAGS += -lXt -lXmu -lX11 -lSM -lICE 
 LDFLAGS += -lncursesw
@@ -37,7 +45,21 @@ APP03_OBJS += stdc.o
 APP03_OBJS += xwin.o 
 APP03_OBJS += xt-proc.o
 APP03_OBJS += awt.o awt-util.o SmeCascade.o
+
+ifdef USE_MOTIF
+CXXFLAGS += -DUSE_MOTIF
 APP03_OBJS += motif.o 
+endif
+
+ifdef USE_XAW3D
+CXXFLAGS += -DXAW3D
+CFLAGS += -DXAW3D
+endif
+
+ifdef USE_XVIEW
+CXXFLAGS += -I$(OPENWIN_HOME)/include -DUSE_XVIEW
+APP03_OBJS += olt.o 
+endif
 
 app03: $(APP03_OBJS)
 
