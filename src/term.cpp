@@ -3,6 +3,7 @@
  */
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ncurses.h>
 #include <string>
@@ -74,7 +75,24 @@ namespace term {
 
 };
 
+/// 端末の行数、桁数を入手する
+static int term_show_size(int argc,char **argv) {
 
+  int LINES = 0, COLUMNS = 0;
+  
+  // 環境変数から初期値を取る
+  const char *t = getenv("COLUMNS");
+  if (t) COLUMNS = atoi(t);
+  t = getenv("LINES");
+  if (t) LINES = atoi(t);
+
+  if (!term::get_screen_size(0, &LINES, &COLUMNS))
+    fputs("not a tty\n",stderr);
+  
+  printf("LINES:%d, COLUMNS:%d\n", LINES, COLUMNS);
+
+  return 0;
+}
 
 /// curses を使ったサンプルコード
 static int cur_sample01(int argc,char **argv) {
@@ -83,9 +101,9 @@ static int cur_sample01(int argc,char **argv) {
    * ncursesの場合は libcursesw をリンクします。
    */
 
-  char *lang = "";
-  
-  setlocale(LC_ALL, lang);
+  const char *lang = "";
+  const char *ltype = setlocale(LC_ALL, lang);
+  fprintf(stderr,"INFO: current locale: %s\n", ltype);
 
   initscr();
   noecho();
@@ -101,6 +119,7 @@ static int cur_sample01(int argc,char **argv) {
   mvwaddstr(win,7,3,"   END:ESC");
 
   mvwaddstr(win,10,3,"あああいいいううう");
+  mvwaddstr(win,12,3,"press [ESC] to stop.");
 
   int ch;
   while((ch = wgetch(win)) != 0x1b){
@@ -123,6 +142,7 @@ static int cur_sample01(int argc,char **argv) {
 #include "subcmd.h"
 
 subcmd term_cmap[] = {
+  { "term-size", term_show_size, },
   { "cur", cur_sample01, },
   { 0 },
 };
