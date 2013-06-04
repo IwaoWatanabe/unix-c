@@ -22,7 +22,7 @@ UNIX C/C++ sample codes.
 %setup -q -c
 
 %build
-make
+make USE_MOTIF=1
 
 %install
 rm -rf $RPM_BUILD_ROOT
