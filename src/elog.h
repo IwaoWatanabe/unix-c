@@ -35,12 +35,17 @@ namespace uc {
   class ELog {
     ELog_Manager *mgr;
   public:
+    /// ログレベル
     enum Level { F, E, W, N, I, A, D, T };
     ELog();
     virtual ~ELog();
+    /// ログ初期化
     virtual void init_elog(const char *ident);
+    /// ログ出力
     virtual int elog(const char *format, ...);
+    /// ログ出力(ログレベルの指定)
     virtual int elog(int level, const char *format, ...);
+    /// ログ出力(ログレベルの指定)
     virtual int velog(int level, const char *format, va_list ap);
   };
 

@@ -108,9 +108,10 @@ namespace uc {
 // --------------------------------------------------------------------------------
 namespace uc {
 
-  /// コンソールとログ・ファイルに出力するログ操作API
+  /// ログを振り分ける操作を担当するクラス
   /*
-    この実装は、スレッドの排他制御を入れていない。
+    この実装は、コンソールとファイルにログ出力する。
+    スレッドの排他制御を入れていない。
    */
   class ELog_Manager {
     Simple_logger app_log, auth_log;
@@ -118,7 +119,9 @@ namespace uc {
   public:
     ELog_Manager(const char *ident, const char *log_dir);
     virtual ~ELog_Manager() {}
+    /// ログをログ出力の実装クラスに転送する
     virtual int vlog(int level, const char *format, va_list ap);
+    /// ログ出力インスタンスを再初期化する
     virtual void reopen();
   };
 
