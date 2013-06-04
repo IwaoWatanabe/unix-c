@@ -53,6 +53,9 @@ int main(int argc, char **argv) {
   extern subcmd stdc_cmap[];
   subcmd_add(stdc_cmap);
 
+  extern subcmd date_cmap[];
+  subcmd_add(date_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }

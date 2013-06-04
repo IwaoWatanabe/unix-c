@@ -1,5 +1,5 @@
 
-CXXFLAGS=-g -pthread -fexceptions -D_REENTRANT 
+CXXFLAGS=-g -pthread -fexceptions -D_REENTRANT -DUSE_SUBCMD
 LDFLAGS= -lstdc++ 
 ALL_MODULE=hello cat01
 ALL_MODULE += app01
@@ -32,7 +32,7 @@ app01: app01.o args.o
 
 csv-util.o csv-tool.o: csv.h
 APP03_OBJS = app03.o subcmd.o stl.o term.o temp.o csv-util.o csv-tool.o mbs.o
-APP03_OBJS += times.o logger.o ini.o
+APP03_OBJS += times.o logger.o ini.o datetime.o
 APP03_OBJS += stdc.o
 APP03_OBJS += xwin.o 
 APP03_OBJS += xt-proc.o
