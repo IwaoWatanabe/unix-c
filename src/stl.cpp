@@ -23,8 +23,28 @@ static int string01(int argc, char **argv) {
 
   bb += aa;
   bb += "def";
+  /*
+    このように += 演算子を使うことにより、文字列に追加できる。
+    ただし、数値や任意のオブジェクトを追加できるわけではない。
+    オブジェクトに、自身の状態をstringの形で出力するメソッドを作り、
+    それを呼び出して追加する必要がある。
+   */
 
   printf("bb: %s: %d\n", bb.c_str(), bb.size());
+  /*
+    string の値を出力する場合は、c_str() を呼び出す。
+    ゼロ文字で終了する const char * を返してくれる。
+   */
+
+  double pi = 3.141592;
+  char buf[80];
+  string rvalue_text(buf, snprintf(buf,sizeof buf,"real value: %f", pi));
+  puts(rvalue_text.c_str());
+
+  /*
+    数値を文字列表現に変えるには、このように　snprintf を利用するとよい。
+    これなら出力書式も調整できる。
+   */
 
   return 0;
 }
