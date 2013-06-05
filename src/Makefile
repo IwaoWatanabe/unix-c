@@ -6,6 +6,7 @@ ALL_MODULE += app01
 ALL_MODULE += app02
 ALL_MODULE += env01
 ALL_MODULE += app03
+ALL_MODULE += app04
 
 LDFLAGS += -lpthread
 ifdef USE_MOTIF
@@ -38,17 +39,23 @@ docs:
 
 app01: app01.o args.o
 
-csv-util.o csv-tool.o: csv.h
-APP03_OBJS = app03.o subcmd.o stl.o term.o temp.o csv-util.o csv-tool.o mbs.o
-APP03_OBJS += times.o logger.o ini.o datetime.o
-APP03_OBJS += stdc.o
-APP03_OBJS += xwin.o 
-APP03_OBJS += xt-proc.o
-APP03_OBJS += awt.o awt-util.o SmeCascade.o
+APP03_OBJS = app03.o subcmd.o
+APP03_OBJS += term.o
+app03: $(APP03_OBJS)
+
+APP04_OBJS = app04.o subcmd.o 
+APP04_OBJS += temp.o stl.o
+APP04_OBJS += term.o
+APP04_OBJS += csv-util.o csv-tool.o mbs.o
+APP04_OBJS += times.o logger.o ini.o datetime.o
+APP04_OBJS += stdc.o
+APP04_OBJS += xwin.o 
+APP04_OBJS += xt-proc.o
+APP04_OBJS += awt.o awt-util.o SmeCascade.o
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF
-APP03_OBJS += motif.o 
+APP04_OBJS += motif.o 
 endif
 
 ifdef USE_XAW3D
@@ -58,11 +65,13 @@ endif
 
 ifdef USE_XVIEW
 CXXFLAGS += -I$(OPENWIN_HOME)/include -DUSE_XVIEW
-APP03_OBJS += olt.o 
+APP04_OBJS += olt.o 
 endif
 
-app03: $(APP03_OBJS)
+app04: $(APP04_OBJS)
 
+subcmd.o: subcmd.h
+csv-util.o csv-tool.o: csv.h
 motif.o: mrmtest.uid
 
 mrmtest.uid: mrmtest.uil
