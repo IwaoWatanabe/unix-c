@@ -3,12 +3,13 @@
 #include "subcmd.h"
 
 static int hello(int argc, char **argv) {
-  printf("called by subcmd.\n");
+  printf("called by subcmd: %s\n", argv[0]);
   return 0;
 }
 
 static subcmd cmap[] = {
   { "hello", hello, },
+  { "hello-xx", hello, },
   { 0 },
 };
 

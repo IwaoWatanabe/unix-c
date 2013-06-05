@@ -71,17 +71,20 @@ static void subcmd_show2(subcmd **ptr, size_t len, FILE *fout) {
 }
 
 /// サブコマンドを実行
-static int subcmd_run(subcmd **ptr, size_t len, int argc, char **argv) {
+int subcmd_run(int argc, char **argv) {
 
   if (argc <= 1) {
-    subcmd_show2(ptr, len, stderr);
+    if (getenv("OLD_SUBCMD"))
+	subcmd_show(cmap_ptr, cmap_len, stderr);
+    else
+	subcmd_show2(cmap_ptr, cmap_len, stderr);
     return -1;
   }
 
   const char *cmd = argv[1];
 
   subcmd **pt;
-  for (pt = ptr; pt < ptr + len; pt++) {
+  for (pt = cmap_ptr; pt < cmap_ptr + cmap_len; pt++) {
     if (strcmp((*pt)->cmd, cmd) == 0) {
       fprintf(stderr, "INFO: %s starting.\n", (*pt)->cmd);
       return (*(*pt)->func)(argc - 1, argv + 1);
@@ -92,10 +95,9 @@ static int subcmd_run(subcmd **ptr, size_t len, int argc, char **argv) {
   return -1;
 }
 
-
 /// サブコマンドを実行
 int subcmd_run(int argc, char **argv, void (*usage)(const char *cmd)) {
-  int rc = subcmd_run(cmap_ptr, cmap_len, argc, argv);
+  int rc = subcmd_run(argc, argv);
   if (rc < 0 && usage) (*usage)(argv[0]);
   return rc;
 }

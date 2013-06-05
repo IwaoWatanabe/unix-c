@@ -10,7 +10,8 @@ struct subcmd {
 };
 
 extern void subcmd_add(subcmd *ptr);
-extern int subcmd_run(int argc, char **argv, void (*usage)(const char *cmd) = 0);
+extern int subcmd_run(int argc, char **argv);
+extern int subcmd_run(int argc, char **argv, void (*usage)(const char *cmd));
 
 #endif
 
