@@ -1,7 +1,8 @@
 /*! \file                                                                                                           
- * \brief 標準Cライブラリの機能を確認する
+ * \brief 標準C/C++ライブラリの機能を確認する
  */
 
+#include <clocale>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -12,6 +13,74 @@
 using namespace std;
 
 namespace {
+  /*
+    無名namespace により、このファイルで定義されるクラスが
+    他のファイルとバッティングしないように保護している
+  */
+
+  /// 生成規則の確認用オブジェクト
+  class XA {
+    string a;
+  public:
+    /// デフォルト・コンストラクタ
+    XA() { cerr << "alloc XA:" << this << endl; }
+    /// コピー・コンストラクタ
+    XA(XA &x) : a(x.a) { cerr << "copy XA:" << a << endl; }
+    /// デストラクタ
+    ~XA() { cerr << "free XA:" << this << ":" << a << endl; }
+    /// パラメータ付きコンストラクタ
+    XA(string a0) : a(a0) { cerr << "alloc XA:" << this << ":" << a << endl; }
+    /// 代入オペレータ
+    XA& operator=(XA &x) { a = x.a; cerr << "assing XA:" << a << endl; return *this; }
+    /*
+      メンバにプリミティブ以外の要素が含まれるため、このオペレータの定義は必須。
+      未定義だと、メモリ破壊につながるので注意！
+     */
+  };
+
+  /// オブジェクトの生成規則の確認
+  static int test_allocation(int argc, char **argv) {
+
+    XA aa("aa");
+    {
+      XA bb("bb");
+      XA *bb0 = new XA("bb0");
+
+      XA *cc = new XA[3];
+      /*
+	それぞれの要素が、デフォルトコンストラクタで初期化される
+       */
+
+      XA dd(aa);
+      /*
+	コピー・コンストラクタが呼ばれる
+       */
+
+      cc[0] = aa;
+      /*
+	= オペレータが呼ばれる
+       */
+
+      delete bb0;
+      /*
+	ポインタの場合は、明示的に delete を呼ばないと開放されない。
+       */
+
+      delete [] cc;
+      /*
+	配列の場合は、delete のスタイルが変わる。
+	それぞれの要素のデストラクタが呼ばれる
+       */
+
+      /*
+	スコープを外れるので bb, dd のデストラクタが呼ばれる
+       */
+    }
+
+    XA ee("ee");
+
+    return 0;
+  }
 
   /// virutal の振る舞いの確認用（継承元）
   class AA {
@@ -67,6 +136,7 @@ namespace {
 	   << "(" << bb << ")" << endl; 
     };
   };
+
 
 };
 
@@ -136,6 +206,27 @@ extern "C" {
     
     return EXIT_SUCCESS;
   }
+
+  /// 型のサイズを確認する
+  static int test_type_size(int argc, char **argv) {
+    cerr << "char: " << sizeof(char) << endl;
+    cerr << "int: " << sizeof(int) << endl;
+    cerr << "short: " << sizeof(short) << endl;
+    cerr << "unsigned: " << sizeof(unsigned) << endl;
+    cerr << "long: " << sizeof(long) << endl;
+    cerr << "unsinged long: " << sizeof(unsigned long) << endl;
+    cerr << "long long: " << sizeof(long long) << endl;
+    cerr << "double: " << sizeof(double) << endl;
+    cerr << "float: " << sizeof(float) << endl;
+    cerr << "void *: " << sizeof(void *) << endl;
+    cerr << "char *: " << sizeof(char *) << endl;
+#if 0
+    void *a = (void *)0x123456789abcdeful;
+    printf("%#lx\n",a);
+#endif
+    return EXIT_SUCCESS;
+  }
+
 };
 
 // --------------------------------------------------------------------------------
@@ -143,9 +234,11 @@ extern "C" {
 #include "subcmd.h"
 
 subcmd stdc_cmap[] = {
+  { "stdc-alloc", test_allocation, },
   { "stdc-auto", test_auto01, },
   { "stdc-atoi", test_atoi, },
   { "stdc-sscanf01", test_sscanf, },
+  { "stdc-size", test_type_size, },
   { NULL, },
 };
 
