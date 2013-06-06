@@ -227,6 +227,49 @@ extern "C" {
     return EXIT_SUCCESS;
   }
 
+
+  /// gettextを使ったメッセージ・カタログの試験
+  static int test_gettext(int argc, char **argv) {
+    char *lang = "", *last_lang;
+    last_lang = setlocale(LC_ALL, lang);
+    /*
+      まず言語を設定する。
+      この例では環境変数の設定から取り込んでいる。
+    */
+
+    cerr << "LANG: " << last_lang << endl;
+    cerr << "CYTPE: " << setlocale(LC_CTYPE, NULL) << endl;
+    cerr << endl;
+
+    char *domain = getenv("DOMAIN");
+    if (!domain) domain = "messages";
+
+    char *localedir = getenv("LOCALE_DIR");
+    if (!localedir) localedir = "./locale";
+    char *lastdir = bindtextdomain(domain, localedir);
+    /*
+      カタログのディレクトリを設定する。
+      ここらあたりは設定ファイルから取り込めるようになったほうが嬉しい
+     */
+    char *lastdomain = textdomain(domain);
+    /*
+      カタログのドメインを設定。
+      主にコマンド名が利用されている。
+     */
+
+    cerr << "last catalog dir: " << lastdir << endl;
+    cerr << "last domain: " << lastdomain << endl;
+    cerr << endl;
+
+    // あとはgettextで取り込む
+    // カタログになければ、テキストは素通しになる。
+    cerr << gettext("gettext testing ..") << endl;
+    cerr << gettext("command panel") << endl;
+    cerr << gettext("quit") << endl;
+
+    return EXIT_SUCCESS;
+  }
+
 };
 
 // --------------------------------------------------------------------------------
@@ -239,6 +282,7 @@ subcmd stdc_cmap[] = {
   { "stdc-atoi", test_atoi, },
   { "stdc-sscanf01", test_sscanf, },
   { "stdc-size", test_type_size, },
+  { "stdc-gettext", test_gettext, },
   { NULL, },
 };
 
