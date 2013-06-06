@@ -20,6 +20,10 @@ LDFLAGS += -L$(OPENWIN_HOME)/lib  -lxview -lolgx
 endif
 LDFLAGS += -lXaw
 LDFLAGS += -lXt -lXmu -lX11 -lSM -lICE 
+ifdef USE_READLINE
+CXXFLAGS += -DUSE_READLINE
+LDFLAGS += -lreadline -lhistory
+endif
 LDFLAGS += -lncursesw
 
 VERSION=0.1
