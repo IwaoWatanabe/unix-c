@@ -16,6 +16,8 @@
 
 namespace {
 
+  using namespace std;
+
   /// マルチバイト文字コードセットを変換をサポートする
   class mbsconv {
     std::string internalEncode, convertEncode, src, target;
@@ -49,8 +51,6 @@ namespace {
     /// 変換エンコードを入手する
     std::string getConvertEncoding();
   };
-
-  using namespace std;
 
   // ロケールとiconvのエンコードの対応(日本語系のみ)
   static struct locale_iconv_tbl {
@@ -225,6 +225,7 @@ static int testIconv(int argc,char **argv) {
   return 0;
 }
 
+// --------------------------------------------------------------------------------
 
 /// テキストをワイド文字としてメモリに読み込む
 /**
@@ -298,11 +299,62 @@ static int test_load_wtext(int argc,char **argv) {
   return 0;
 }
 
+// --------------------------------------------------------------------------------
+
+/// ワイド文字列からマルチバイト文字列
+/// 変換できなかった場合はfalse
+bool narrow(string &dst, const wstring &src) {
+  char *mbs = new char[src.length() * MB_CUR_MAX + 1];
+  size_t len = wcstombs(mbs, src.c_str(), src.length() * MB_CUR_MAX + 1);
+  dst = mbs;
+  delete [] mbs;
+  return len != (size_t)-1;
+}
+
+/// マルチバイト文字列からワイド文字列
+/// 変換できなかった場合はfalse
+bool widen(wstring &dst, const string &src) {
+  wchar_t *wcs = new wchar_t[src.length() + 1];
+  size_t len = mbstowcs(wcs, src.c_str(), src.length() + 1);
+  dst = wcs;
+  delete [] wcs;
+  return len != (size_t)-1;
+}
+
+/// ワイドキャラクタの操作試験
+static int test_wcs(int argc, char **argv) {
+  char *lang = "", *last_lang;
+  last_lang = setlocale(LC_ALL, lang);
+  /// ワイドキャラクタを操作する前に setlocaleを呼び出す必要がある
+
+  string mbs;
+  wstring wcs;
+
+  if (widen(wcs, "本日は晴天なり") && narrow(mbs, wcs)) {
+    cerr << mbs << endl;
+    wcout << wcs << endl;
+
+    fprintf(stderr,"wcs:%ls\n"
+	    "mbs:%s\n",wcs.c_str(), mbs.c_str());
+
+    // %ls を使うと、fprintf内部でマルチバイトに変換して表示してくれる。
+  }
+
+  return 0;
+}
+
+// --------------------------------------------------------------------------------
+
+#ifdef USE_SUBCMD
+
 #include "subcmd.h"
 
 subcmd mbs_cmap[] = {
   { "iconv", testIconv,  },
   { "wtext", test_load_wtext,  },
+  { "wcs", test_wcs,  },
   { 0 },
 };
+
+#endif
 
