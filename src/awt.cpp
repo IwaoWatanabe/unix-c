@@ -49,6 +49,12 @@ extern int getXawListColumns(Widget list);
 extern int getXawListRows(Widget list);
 
 namespace xwin {
+  extern wstring load_wtext(const char *path, size_t buf_len = 4096);
+  extern bool load_dirent(const char *dirpath, vector<string> &entries, bool with_hidden_file = false);
+  extern String *as_String_array(vector<string> &entries);
+};
+
+namespace {
 
   /// トップレベル・ウィンドウだけ表示する
   static int onlytop(int argc, char **argv) {
@@ -78,7 +84,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   static Atom WM_PROTOCOLS, WM_DELETE_WINDOW, COMPOUND_TEXT, MULTIPLE;
 
@@ -179,7 +185,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// メインループの関数とデストラクタを定義する
   struct xt00 {
@@ -311,7 +317,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// ダイアログをウィジェット相対で表示する
   static void popup_dialog(Widget target, Widget shell, XtGrabKind kind) {
@@ -462,7 +468,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// クラス階層を表示するアプリのデータを保持する
   struct tree_app : xt00 { 
@@ -647,7 +653,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   // ウィジェットの名前を元にメニューを探す
   static Widget find_menu(Widget widget, String name) {
@@ -775,9 +781,6 @@ namespace xwin {
     XtCallCallbacks(list, XtNcallback, (XtPointer)rs);
   }
 
-  extern bool load_dirent(const char *dirpath, vector<string> &entries, bool with_hidden_file = false);
-  extern String *as_String_array(vector<string> &entries);
-
   /// メニューアイテムを選択した時の処理
   static void menu_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
     cout << "TRACE: " << XtName(widget) << " selected." << endl;
@@ -824,8 +827,8 @@ namespace xwin {
 
   void list_app::create_contents(Widget top) {
 
-    load_dirent(".", entries, false);
-    String *slist = as_String_array(entries);
+    xwin::load_dirent(".", entries, false);
+    String *slist = xwin::as_String_array(entries);
 
     Widget pane = 
       XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
@@ -945,7 +948,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// テキスト・エディタの構成要素を格納
   struct text_app : xt00 {
@@ -1067,8 +1070,6 @@ namespace xwin {
       XtPopup(menu, XtGrabNonexclusive);
 #endif
   }
-
-  extern wstring load_wtext(const char *path, size_t buf_len = 4096);
 
   /// 選択された領域のテキストを入手する
   static wstring fetch_selected_text(Widget textw) {
@@ -1379,7 +1380,7 @@ namespace xwin {
 
     cerr << "TRACE: work proc called" << endl;
 
-    wstring wtext = load_wtext(__FILE__);
+    wstring wtext = xwin::load_wtext(__FILE__);
 
     append_text(app->buf, wtext.c_str(), wtext.size());
 
@@ -1508,15 +1509,15 @@ namespace xwin {
 #include "subcmd.h"
 
 subcmd awt_cmap[] = {
-  { "top", xwin::onlytop, },
-  { "win03", xwin::onlytop, },
-  { "multi", xwin::awt_multi_apps, },
-  { "hello02", xwin::awt_hello, },
-  { "dialog", xwin::awt_dialog, },
-  { "dialog02", xwin::awt_dialog02, },
-  { "tree", xwin::awt_class_tree, },
-  { "list", xwin::awt_list, },
-  { "edit", xwin::awt_editor, },
+  { "top", onlytop, },
+  { "win03", onlytop, },
+  { "multi", awt_multi_apps, },
+  { "hello02", awt_hello, },
+  { "dialog", awt_dialog, },
+  { "dialog02", awt_dialog02, },
+  { "tree", awt_class_tree, },
+  { "list", awt_list, },
+  { "edit", awt_editor, },
   { 0 },
 };
 

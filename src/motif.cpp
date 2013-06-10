@@ -34,9 +34,13 @@
 
 using namespace std;
 
-extern std::wstring load_wtext(const char *path, const char *encoding = "UTF-8", time_t *lastmod = 0, size_t buf_len = 4096);
+extern wstring load_wtext(const char *path, const char *encoding = "UTF-8", time_t *lastmod = 0, size_t buf_len = 4096);
 
 namespace xwin {
+extern bool load_dirent(const char *dirpath, vector<string> &entries, bool with_hidden_file = false);
+};
+
+namespace {
 
   /// トップレベル・シェルの破棄する
   static void quit_application(Widget widget, XtPointer client_data, XtPointer call_data) {
@@ -79,7 +83,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// メニュー・アイテムの登録準備
   struct menu_item {
@@ -122,13 +126,11 @@ namespace xwin {
     XtFree ((char *)tbl); 
   }
 
-  extern bool load_dirent(const char *dirpath, vector<string> &entries, bool with_hidden_file = false);
-
   /// フォルダ一覧を表示するリスト
   static void create_folder_list(Widget top) {
     vector<string> entries;
 
-    load_dirent(".", entries, false);
+    xwin::load_dirent(".", entries, false);
 
     Widget main =
       XmVaCreateManagedMainWindow(top,"list-main", NULL);
@@ -767,7 +769,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// 素朴なテキストエディタ(Motif版)
   struct mtext_app {
@@ -1014,7 +1016,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// MRM;Motif Resource Managerを利用するサンプル・コード
   struct mrm_app {
@@ -1140,10 +1142,10 @@ namespace xwin {
 #include "subcmd.h"
 
 subcmd motif_cmap[] = {
-  { "hello03", xwin::motif_hello,  },
-  { "motif", xwin::motif_parts,  },
-  { "edit02", xwin::motif_edit,  },
-  { "mrm", xwin::motif_mrmtest,  },
+  { "hello03", motif_hello,  },
+  { "motif", motif_parts,  },
+  { "edit02", motif_edit,  },
+  { "mrm", motif_mrmtest,  },
   { 0 },
 };
 

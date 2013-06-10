@@ -2,24 +2,122 @@
  * \brief Xlibを利用したGUIサンプル・コード
  */
 
+#include <X11/Xlib.h>
+#include <X11/Xresource.h>
+
+namespace xwin {
+
+  /// Xの資源を利用するコードが実装するインタフェース
+  class X_resoruce {
+  public:
+    virtual ~X_resoruce() { }
+    /// このメソッドが呼ばれたらリソースを開放する
+
+    /// このメソッドを呼び出されたらリソースを確保する準備ができている
+    virtual void realize() { }
+    /*
+      何度呼ばれても大丈夫なようにすること
+     */
+    virtual void dispose() { }
+  };
+
+  class X_frame;
+
+  /// Xサーバの接続情報を管理するクラス
+  /*
+    実装クラスはコンテナによって提供される。
+    ユーザ・コードが継承することはない。
+  */
+  class X_server {
+  public:
+    /// サーバ接続の参照
+    Display *ref;
+    /// ウィンドウ・マネージャとの通信用
+    Atom WM_PROTOCOLS, WM_DELETE_WINDOW;
+
+    virtual ~X_server() { }
+    /// リソース・データベースを入手する
+    virtual XrmDatabase get_resource_database();
+    /// Atomに割りあたっているテキストを入手する
+    virtual const char *get_atom_name(Atom atom);
+    /// Xの接続時にAtomを設定するアドレスを定義
+    virtual void store_atom(const char *name, Atom *atom) = 0;
+    /// Xの接続切断前に解放するリソースを登録する
+    virtual void add_resoruce(X_resoruce *res) = 0;
+    /// リソースの登録を解除する
+    virtual void remove_resoruce(X_resoruce *res) = 0;
+    /// サーバに接続する
+    virtual bool connect(char *display_name = "") = 0;
+    /// サーバへの接続を解除する
+    virtual void disconnect() = 0;
+    /// フレームを登録する
+    virtual void add_frame(X_frame *frame) = 0;
+    /// フレームの登録を解除する
+    virtual void remove_frame(X_frame *frame) = 0;
+
+    virtual XFontSet load_font(const char *font_name);
+    /// このメソッドを呼び出されたらリソースを確保する準備ができている
+    virtual void realize() { }
+
+  protected:
+    X_server();
+    virtual bool dispach() = 0;
+  };
+
+  /// トップレベルのウィンドウを管理するクラス
+  /*
+    実装クラスはライブラリとして提供される。
+    ユーザ・コードが継承して利用する。
+  */
+  class X_frame : public X_resoruce {
+  protected:
+    /// サーバの接続情報を記録
+    X_server *server;
+    /// 作業ウィンドウ
+    Window window;
+    /// 基本画像操作
+    GC gc;
+
+  public:
+    X_frame(const char *app_name, const char *app_class);
+    virtual ~X_frame() { }
+    /// X_server は、このメソッドを利用してwindowを保持しているか診断する
+    virtual bool contains(Window window);
+    /// イベントを処理する
+    virtual void dispatch(XEvent &event) { }
+    /// ウインドウのタイトルを設定する
+    virtual void set_title(const char *title);
+  };
+};
+
+
 #include <cerrno>
 #include <clocale>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <csignal>
 #include <deque>
 #include <iostream>
+#include <map>
 #include <pwd.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <vector>
 
-#include <X11/Xlib.h>
 #include <X11/Xlocale.h>
-#include <X11/Xresource.h>
 #include <X11/Xutil.h>
 
 using namespace std;
+
+static int exit_flag = 0;
+
+static void interrupt_handler(int sig) { exit_flag = 1; }
+
+static void setup_interrupt_handler() {
+  if (SIG_ERR == signal(SIGINT, interrupt_handler))
+    perror("ERROR: sinale SIGINT");
+}
 
 /// ウィンドウだけ表示する簡単な例
 static int simple_window(int argc,char **argv) {
@@ -67,7 +165,8 @@ static int simple_window(int argc,char **argv) {
    */
 
   XEvent event;
-  int exit_flag = 0;
+
+  setup_interrupt_handler();
 
   while (!exit_flag) {
     XNextEvent(display, &event);
@@ -93,6 +192,8 @@ static int simple_window(int argc,char **argv) {
     プロセスが終了するなら、これらを呼び出さずとも自動的に開放される。
    */
 
+  cerr << "INFO: display closed." << endl;
+
   return 0;
 }
 
@@ -100,6 +201,258 @@ static int simple_window(int argc,char **argv) {
 // 先のコードをC++スタイルで記述したもの
 
 namespace xwin {
+
+  class X_server_XlibImpl : public X_server {
+  public:
+    X_server_XlibImpl();
+    ~X_server_XlibImpl();
+    void add_resoruce(X_resoruce *res);
+    /// リソースの登録を解除する
+    void remove_resoruce(X_resoruce *res);
+    /// サーバに接続する
+    bool connect(char *display_name = "");
+    /// サーバへの接続を解除する
+    void disconnect();
+    /// フレームを登録する
+    void add_frame(X_frame *frame);
+    /// フレームの登録を解除する
+    void remove_frame(X_frame *frame);
+    /// Xの接続時にAtomを設定するアドレスを定義
+    void store_atom(const char *name, Atom *atom);
+
+    bool dispatch();
+  private:
+    vector<X_frame *> frames;
+    vector<X_resoruce *> resources;
+    map<string,Atom *> atom_ref;
+  };
+
+
+  X_server::X_server() :
+    ref(0), WM_PROTOCOLS(0), WM_DELETE_WINDOW(0) { }
+
+  XrmDatabase X_server::get_resource_database() {
+    return 0;
+  }
+
+  const char *X_server::get_atom_name(Atom atom) {
+    if (!ref || !atom) return "";
+    return XGetAtomName(ref, atom);
+  }
+
+  /// フォントの読み込み
+  XFontSet X_server::load_font(const char *font_name) {
+    int missing_count = 0;
+    char **missing_list = NULL, *default_string;
+    
+    XFontSet font = 
+      XCreateFontSet(ref, font_name,
+		     &missing_list, &missing_count, &default_string );
+
+    if (font == NULL) {
+      cerr << "ERROR: failed to create fontset:" << font_name << endl;
+      return font;
+      /*
+	XCreateFontSet は指示するフォントを読込む。
+	ただし、サーバに代替フォントすら存在しなければ、NULLが返る。
+	例えば日本語を表示させたいのに、日本語フォントを一切インストールしていない場合。
+       */
+    }
+
+    if (missing_count) {
+      /*
+	指定したフォントが見つからず、代替フォントが採用された場合にここに処理が移る。
+	ここでは代替フォント名をフィードバックしている。
+      */
+      cerr << "WARNING: font list missing: " << font_name << endl;
+      for (int i = 0; i < missing_count; i++)
+	cerr << "\t" << missing_list[i] << endl;
+      
+      cerr << "default string: " << default_string << endl;
+      /*
+	表示できない文字の代替文字をフィードバックしている。
+      */
+      XFreeStringList(missing_list);
+      /*
+	レポートで返されたリストは開放する必要がある。
+       */
+    }
+    return font;
+  }
+
+  X_server_XlibImpl::X_server_XlibImpl() {
+    store_atom("WM_PROTOCOLS", &WM_PROTOCOLS);
+    store_atom("WM_DELETE_WINDOW", &WM_DELETE_WINDOW);
+  }
+
+  X_server_XlibImpl::~X_server_XlibImpl() { disconnect(); }
+
+  void X_server_XlibImpl::store_atom(const char *name, Atom *atom) {
+    if (!name || !atom) return;
+    string atom_name(name);
+    atom_ref.insert(map<string,Atom *>::value_type(atom_name, atom));
+  }
+
+  void X_server_XlibImpl::add_resoruce(X_resoruce *res) {
+    if (!res) return;
+    resources.push_back(res);
+  }
+
+  void X_server_XlibImpl::remove_resoruce(X_resoruce *res) {
+    if (!res) return;
+    vector<X_resoruce *>::iterator pos = find(resources.begin(), resources.end(), res);
+    if (pos != resources.end()) resources.erase(pos);
+  }
+  
+  void X_server_XlibImpl::add_frame(X_frame *frame) {
+    resources.push_back(frame);
+  }
+
+  void X_server_XlibImpl::remove_frame(X_frame *frame) {
+    if (!frame) return;
+    vector<X_frame *>::iterator pos = find(frames.begin(), frames.end(), frame);
+    if (pos != frames.end()) frames.erase(pos);
+  }
+
+  bool X_server_XlibImpl::connect(char *display_name) {
+
+    Display *disp = XOpenDisplay(display_name);
+    /*
+      Xサーバと接続する。一定時間経過しても接続できなければ NULLが返る。
+      接続名が空テキストであれば、環境変数 $DISPLAYに設定されている値を利用する。
+    */
+    if (!disp) {
+      cerr << "ERROR: can not connect xserver." << endl;
+      return false;
+    }
+    if (ref) disconnect();
+    ref = disp;
+
+    // アトムの値の入手
+    map<string,Atom *>::iterator it = atom_ref.begin();
+    for (; it != atom_ref.end(); it++) {
+      *it->second = XInternAtom(ref, it->first.c_str(), True);
+    }
+
+    {
+      vector<X_frame *>::iterator it = frames.begin();
+      for (; it != frames.end(); it++) { (*it)->realize(); }
+    }
+
+    return true;
+  }
+
+  void X_server_XlibImpl::disconnect() {
+    if (!ref) return;
+    {
+      vector<X_resoruce *>::iterator it = resources.begin();
+      for (; it != resources.end(); it++) { (*it)->dispose(); }
+    }
+    {
+      vector<X_frame *>::iterator it = frames.begin();
+      for (; it != frames.end(); it++) { (*it)->dispose(); }
+    }
+
+    XCloseDisplay(ref);
+    cerr << "#disconnect called." << endl;
+    /*
+      サーバにリソースを開放のリクエストを送っている。
+      プロセスが終了するなら、これらを呼び出さずとも自動的に開放される。
+      このメソッドは、処理がここまで到達したことを認識できるように用意した。
+    */
+  }
+
+  bool X_server_XlibImpl::dispatch() {
+    while (!exit_flag || frames.empty()) return false;
+
+    XEvent event;
+    XNextEvent(ref, &event);
+
+    if (XFilterEvent(&event,None)) return true;
+
+    vector<X_frame *>::iterator it = frames.begin();
+    for (; it != frames.end(); it++) {
+      if (!(*it)->contains(event.xany.window)) continue;
+      (*it)->dispatch(event);
+    }
+
+    return true;
+  }
+
+  // --------------------------------------------------------------------------------
+
+  X_frame::X_frame(const char *app_name, const char *app_class)
+    : server(0), window(0), gc(0) { }
+
+  bool X_frame::contains(Window target) {
+    return window == target;
+  }
+
+  void X_frame::set_title(const char *title) {
+    char *ttitle = (char *)title;
+    Display *const display = server->ref;
+    XTextProperty prop;
+    int rc = XmbTextListToTextProperty(display,&ttitle,1,XStdICCTextStyle,&prop);
+    if (rc != 0)
+      cerr << "WARNING: XmbTextListToTextProperty failed: " << rc <<endl;
+    else {
+      XSetWMName(display,window,&prop);
+      XFree(prop.value);
+    }
+    cerr << "INFO: window title: " << title <<endl;
+  }
+
+  // --------------------------------------------------------------------------------
+
+  class X_frame_XlibImpl : public X_frame {
+  public:
+    X_frame_XlibImpl(const char *app_name, const char *app_class);
+    ~X_frame_XlibImpl();
+    void realize();
+    void dispose();
+  };
+
+  X_frame_XlibImpl::X_frame_XlibImpl(const char *app_name, const char *app_class)
+    : X_frame(app_name, app_class) { }
+    
+  X_frame_XlibImpl::~X_frame_XlibImpl() { }
+  
+  void X_frame_XlibImpl::realize() {
+    Display *const display = server->ref;
+    const Window parent = DefaultRootWindow(display);
+    const int screen = DefaultScreen(display);
+    unsigned long background = WhitePixel(display, screen), 
+      border_color = BlackPixel(display, screen);
+    int x = 0, y = 0, width = 100, height = 100, border_width = 2;
+
+    window = 
+      XCreateSimpleWindow(display, parent, x, y, width, height, 
+			  border_width, border_color, background);
+    /*
+      ウィンドウを作成する。
+      これで指定していない、その他のウィンドウ属性は親から引き継ぐ。
+      ルートの配置するトップレベルウィンドウの場合は、
+      ウィンドウマネージャの介入が入って、
+      配置位置や大きさはリクエスト通りにはならないこともある。
+      生成した直後は非表示状態なので、あとで XMapWindow　を使って表示状態にする。
+    */
+
+    gc = DefaultGC(display, screen);
+  }
+
+  void X_frame_XlibImpl::dispose() {
+    if (!window) return;
+
+    Display *const display = server->ref;
+    if (gc && gc != DefaultGC(display, DefaultScreen(display)))
+      XFreeGC(display, gc);
+    XDestroyWindow(display, window);
+    window = 0;
+  }
+
+};
+
+namespace {
 
   /// Xアプリケーションの雛形
   struct xlib01 {
@@ -176,7 +529,8 @@ namespace xwin {
     */
 
     XEvent event;
-    int exit_flag = 0;
+    setup_interrupt_handler();
+
     while (!exit_flag) {
       XNextEvent(display, &event);
       
@@ -208,7 +562,7 @@ namespace xwin {
   /// C++スタイル で作成した Simple Window
   static int
   simple_window02(int argc,char **argv) {
-    xwin::xlib01 *app = new xwin::xlib01;
+    xlib01 *app = new xlib01;
   
     if (!app->connect_server()) return 1;
     app->create_application_window();
@@ -220,7 +574,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// 行単位でテキストを操作するクラス
   class line_text {
@@ -520,7 +874,7 @@ namespace xwin {
 
   /// テキストを表示するアプリケーション
   static int text_list(int argc,char **argv) {
-    xwin::xlib02 *app = new xwin::xlib02;
+    xlib02 *app = new xlib02;
 
     const char *text_file = getenv("TEXT");
     if (!text_file) text_file = __FILE__;
@@ -548,7 +902,7 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
-namespace xwin {
+namespace {
 
   /// テキストを表示/入力するアプリケーション
   struct xlib03 : xlib02 {
@@ -808,7 +1162,6 @@ namespace xwin {
     XMapWindow(display, window);
 
     XEvent event;
-    int exit_flag = 0;
 
     int wbuf_len = 128;
     wchar_t *wbuf = (wchar_t *)malloc(wbuf_len * sizeof (*wbuf));
@@ -902,12 +1255,15 @@ namespace xwin {
 	process_expose(&event);
 	break;
       case FocusIn :
-	if (event.xany.window == window && input_context) 
+	if (input_context) 
 	  XSetICFocus(input_context);
 	break;
       case FocusOut :
-	if (event.xany.window == window && input_context) 
+	if (input_context) 
 	  XUnsetICFocus(input_context);
+	break;
+      case MappingNotify:
+	XRefreshKeyboardMapping(&event.xmapping);
 	break;
       case ClientMessage:
 	if (event.xclient.message_type == WM_PROTOCOLS &&
@@ -931,7 +1287,7 @@ namespace xwin {
 
   /// テキストを表示するアプリケーション
   static int text_inputs(int argc,char **argv) {
-    xwin::xlib03 *app = new xwin::xlib03;
+    xlib03 *app = new xlib03;
 
     const char *text_file = getenv("TEXT");
     if (!text_file) text_file = __FILE__;
@@ -957,15 +1313,18 @@ namespace xwin {
 
 // --------------------------------------------------------------------------------
 
+#ifdef USE_SUBCMD
+
 #include "subcmd.h"
 
 subcmd xwin_cmap[] = {
-  { "win", xwin::simple_window02, },
+  { "win", simple_window02, },
   { "win01", simple_window, },
-  { "win02", xwin::simple_window02, },
-  { "text", xwin::text_inputs, },
-  { "text01", xwin::text_list, },
-  { "text02", xwin::text_inputs, },
+  { "win02", simple_window02, },
+  { "text", text_inputs, },
+  { "text01", text_list, },
+  { "text02", text_inputs, },
   { 0 },
 };
 
+#endif
