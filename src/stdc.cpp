@@ -270,6 +270,98 @@ extern "C" {
     return EXIT_SUCCESS;
   }
 
+  /// langinfo の出力を確認する
+  static int test_langinfo(int argc, char **argv) {
+    char *lang = "", *last_lang;
+    last_lang = setlocale(LC_ALL, lang);
+
+    printf("Sun-Sat: %s %s %s %s %s %s %s\n",
+	   nl_langinfo(DAY_1),
+	   nl_langinfo(DAY_2),
+	   nl_langinfo(DAY_3),
+	   nl_langinfo(DAY_4),
+	   nl_langinfo(DAY_5),
+	   nl_langinfo(DAY_6),
+	   nl_langinfo(DAY_7));
+
+    printf("Sun-Sat(abbr): %s %s %s %s %s %s %s\n",
+	   nl_langinfo(ABDAY_1),
+	   nl_langinfo(ABDAY_2),
+	   nl_langinfo(ABDAY_3),
+	   nl_langinfo(ABDAY_4),
+	   nl_langinfo(ABDAY_5),
+	   nl_langinfo(ABDAY_6),
+	   nl_langinfo(ABDAY_7));
+
+    printf("Month: %s %s %s %s %s %s %s %s %s %s %s %s\n",
+	   nl_langinfo(MON_1),
+	   nl_langinfo(MON_2),
+	   nl_langinfo(MON_3),
+	   nl_langinfo(MON_4),
+	   nl_langinfo(MON_5),
+	   nl_langinfo(MON_6),
+	   nl_langinfo(MON_7),
+	   nl_langinfo(MON_8),
+	   nl_langinfo(MON_9),
+	   nl_langinfo(MON_10),
+	   nl_langinfo(MON_11),
+	   nl_langinfo(MON_12));
+
+    printf("Month(abbr): %s %s %s %s %s %s %s %s %s %s %s %s\n",
+	   nl_langinfo(ABMON_1),
+	   nl_langinfo(ABMON_2),
+	   nl_langinfo(ABMON_3),
+	   nl_langinfo(ABMON_4),
+	   nl_langinfo(ABMON_5),
+	   nl_langinfo(ABMON_6),
+	   nl_langinfo(ABMON_7),
+	   nl_langinfo(ABMON_8),
+	   nl_langinfo(ABMON_9),
+	   nl_langinfo(ABMON_10),
+	   nl_langinfo(ABMON_11),
+	   nl_langinfo(ABMON_12));
+
+    printf("Date & Time: %s\n", nl_langinfo(D_T_FMT));
+    printf("Date: %s\n", nl_langinfo(D_FMT));
+    printf("Time: %s\n", nl_langinfo(T_FMT));
+    printf("Time(AM/PM): %s\n", nl_langinfo(T_FMT_AMPM));
+
+    printf("Codeset Name: %s\n", nl_langinfo(CODESET));
+    printf("Radix character: %s\n", nl_langinfo(RADIXCHAR));
+    printf("thousands separator: %s\n", nl_langinfo(THOUSEP));
+    printf("currency symbol: %s\n", nl_langinfo(CRNCYSTR));
+    printf("alternative digits: %s\n", nl_langinfo(ALT_DIGITS));
+    printf("affirmative word: %s\n", nl_langinfo(YESSTR));
+    printf("affirmative response: %s\n", nl_langinfo(YESEXPR));
+    printf("negative word: %s\n", nl_langinfo(NOSTR));
+    printf("negative resposnse: %s\n", nl_langinfo(NOEXPR));
+
+    return EXIT_SUCCESS;
+  }
+
+  /// localconv の出力を確認する
+  static int test_lconv(int argc, char **argv) {
+    char *lang = "", *last_lang;
+    last_lang = setlocale(LC_ALL, lang);
+    
+    struct lconv *lp = localeconv();
+    printf("decima point: %s\n", lp->decimal_point);
+    printf("thusands separator: %s\n", lp->thousands_sep);
+    printf("iso currency symbol\n", lp->int_curr_symbol);
+    printf("currency symbol\n", lp->currency_symbol);
+
+    printf("currency symbol: %s\n", lp->mon_decimal_point);
+    printf("positive sign: %s\n", lp->positive_sign);
+    printf("negative sign: %s\n", lp->negative_sign);
+    printf("int_frac_digits: %d\n", lp->int_frac_digits);
+    printf("frac_digits: %d\n", lp->frac_digits);
+    printf("p_cs_precedes: %d\n", lp->p_cs_precedes);
+    printf("p_sep_by_space: %d\n", lp->p_sep_by_space);
+    printf("n_cs_precedes: %d\n", lp->n_cs_precedes);
+    printf("n_sep_by_space: %d\n", lp->n_sep_by_space);
+    printf("p_sign_posn: %d\n", lp->p_sign_posn);
+    printf("n_sign_posn: %d\n", lp->n_sign_posn);
+  }
 };
 
 // --------------------------------------------------------------------------------
@@ -283,6 +375,8 @@ subcmd stdc_cmap[] = {
   { "stdc-sscanf01", test_sscanf, },
   { "stdc-size", test_type_size, },
   { "stdc-gettext", test_gettext, },
+  { "stdc-langinfo", test_langinfo, },
+  { "stdc-lconv", test_lconv, },
   { NULL, },
 };
 

@@ -1,5 +1,6 @@
 
-CXXFLAGS=-g -pthread -fexceptions -D_REENTRANT -DUSE_SUBCMD
+CXXFLAGS = -g -fexceptions
+CXXFLAGS += -pthread -D_REENTRANT -DUSE_SUBCMD
 LDFLAGS= -lstdc++ 
 ALL_MODULE=hello cat01
 ALL_MODULE += app01
