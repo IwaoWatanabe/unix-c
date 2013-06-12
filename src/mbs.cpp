@@ -24,7 +24,7 @@ namespace {
     iconv_t convertEngine;
     
     mbsconv();
-    bool open(std::string src, std::string tocode);
+    bool open(const std::string &src, const std::string &tocode);
     void close();
     
     const char *lookup(const char *enc);
@@ -33,16 +33,16 @@ namespace {
     virtual ~mbsconv();
 
     /// 変換コンバータを入手する(現在のlocale相対)
-    static mbsconv *createConvertHelper(std::string encode);
+    static mbsconv *createConvertHelper(const std::string &encode);
 
-    std::string convert(const char *target, std::string tocode, std::string fromcode);
+    std::string convert(const char *target, const std::string &tocode, const std::string &fromcode);
 
     /// 内部コードを指定している外部コードに変換する
-    std::string encode(std::string txt);
+    std::string encode(const std::string &txt);
     std::string encode(const char *txt);
 
     /// 指定している外部コードを内部コードに変換する
-    std::string decode(std::string txt);
+    std::string decode(const std::string &txt);
     std::string decode(const char *txt);
 
     /// 内部コードのエンコードを入手する
@@ -100,7 +100,7 @@ namespace {
   }
 
   /// 新しい変換エンジンを作成する
-  bool mbsconv::open(string tcode, string fromcode) {
+  bool mbsconv::open(const string &tcode, const string &fromcode) {
 
     iconv_t cd = ::iconv_open(tcode.c_str(), fromcode.c_str());
     if (cd < 0) {
@@ -124,7 +124,7 @@ namespace {
     return internalEncode;
   }
 
-  mbsconv* mbsconv::createConvertHelper(string encode) {
+  mbsconv* mbsconv::createConvertHelper(const string &encode) {
     mbsconv *ret = new mbsconv();
     ret->convertEncode = encode;
     return ret;
@@ -134,7 +134,7 @@ namespace {
     return convert(txt, internalEncode, convertEncode);
   }
 
-  string mbsconv::encode(string txt) {
+  string mbsconv::encode(const string &txt) {
     return convert(txt.c_str(), internalEncode, convertEncode);
   }
 
@@ -142,11 +142,11 @@ namespace {
     return convert(txt, convertEncode, internalEncode);
   }
 
-  string mbsconv::decode(string txt) {
+  string mbsconv::decode(const string &txt) {
     return convert(txt.c_str(), convertEncode, internalEncode);
   }
 
-  string mbsconv::convert(const char *text, string fromcode, string tocode) {
+  string mbsconv::convert(const char *text, const string &fromcode, const string &tocode) {
     if (src.empty() || target.empty() || tocode != target || src != fromcode) {
       if (!open(tocode, fromcode)) return "";
     }
@@ -368,7 +368,6 @@ static int test_wcs(int argc, char **argv) {
 // --------------------------------------------------------------------------------
 
 #ifdef USE_SUBCMD
-
 #include "subcmd.h"
 
 subcmd mbs_cmap[] = {
