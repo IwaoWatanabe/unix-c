@@ -8,6 +8,7 @@ ALL_MODULE += app02
 ALL_MODULE += env01
 ALL_MODULE += app03
 ALL_MODULE += app04
+ALL_MODULE += header-test.o
 
 LDFLAGS += -lpthread
 ifdef USE_MOTIF
@@ -75,6 +76,7 @@ endif
 
 app04: $(APP04_OBJS)
 
+header-test.o: subcmd.h xt-proc.h
 subcmd.o: subcmd.h
 csv-util.o csv-tool.o: csv.hpp
 motif.o: mrmtest.uid
