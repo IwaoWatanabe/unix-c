@@ -2,7 +2,7 @@
  * \brief .INIファイルを取り扱うAPI
  */
 
-#include "ini.h"
+#include "ini.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -416,6 +416,7 @@ test_ini01(int argc, char **argv) {
   return 0;
 }
 
+#ifdef USE_SUBCMD
 #include "subcmd.h"
 
 subcmd ini_cmap[] = {
@@ -423,3 +424,4 @@ subcmd ini_cmap[] = {
   { NULL, },
 };
 
+#endif

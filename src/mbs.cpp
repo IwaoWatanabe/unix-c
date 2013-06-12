@@ -304,21 +304,43 @@ static int test_load_wtext(int argc,char **argv) {
 /// ワイド文字列からマルチバイト文字列
 /// 変換できなかった場合はfalse
 bool narrow(string &dst, const wstring &src) {
+#if 0
+  // こちらはベタな変換
   char *mbs = new char[src.length() * MB_CUR_MAX + 1];
   size_t len = wcstombs(mbs, src.c_str(), src.length() * MB_CUR_MAX + 1);
   dst = mbs;
   delete [] mbs;
   return len != (size_t)-1;
+#else
+  // こちらはstringのメモリ管理を利用した書き方
+  size_t slen = src.length() * MB_CUR_MAX + 1;
+  dst.resize(slen);
+  size_t len = wcstombs((char *)dst.data(), src.c_str(), slen);
+  bool result = len != (size_t)-1;
+  if (result) dst.resize(len);
+  return result;
+#endif
 }
 
 /// マルチバイト文字列からワイド文字列
 /// 変換できなかった場合はfalse
 bool widen(wstring &dst, const string &src) {
+#if 0
+  // こちらはベタな変換
   wchar_t *wcs = new wchar_t[src.length() + 1];
   size_t len = mbstowcs(wcs, src.c_str(), src.length() + 1);
   dst = wcs;
   delete [] wcs;
   return len != (size_t)-1;
+#else
+  // こちらはwstringのメモリ管理を利用した書き方
+  size_t slen = src.length() + 1;
+  dst.resize(slen);
+  size_t len = mbstowcs((wchar_t *)dst.data(), src.c_str(), slen);
+  bool result = len != (size_t)-1;
+  if (result) dst.resize(len);
+  return result;
+#endif
 }
 
 /// ワイドキャラクタの操作試験

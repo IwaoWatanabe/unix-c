@@ -3,6 +3,10 @@
 
 #include <X11/Intrinsic.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern const char *getXtClassName(WidgetClass klass);
 extern WidgetClass getXtSuperClass(WidgetClass klass);
 extern String getXtName(Widget widget);
@@ -16,5 +20,9 @@ extern Boolean dispose_work_proc(XtPointer closure);
 extern Widget find_shell(Widget t, Boolean need_top_level);
 extern void dispose_shell(Widget w);
 extern void show_component_tree(Widget target, int level = 2);
+
+#ifdef __cplusplus
+};
+#endif
 
 #endif

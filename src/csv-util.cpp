@@ -2,6 +2,8 @@
  * \brief CSVファイルを取り扱うAPI
  */
 
+#include "csv.hpp"
+
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -15,8 +17,6 @@
 #include <unistd.h>
 
 using namespace std;
-
-#include "csv.h"
 
 namespace uc {
   /// CSVを読み込み、その語の加工処理を CSV_Reader に委譲するクラスが実装するインタフェース

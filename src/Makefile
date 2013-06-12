@@ -76,7 +76,7 @@ endif
 app04: $(APP04_OBJS)
 
 subcmd.o: subcmd.h
-csv-util.o csv-tool.o: csv.h
+csv-util.o csv-tool.o: csv.hpp
 motif.o: mrmtest.uid
 
 mrmtest.uid: mrmtest.uil

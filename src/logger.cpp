@@ -2,12 +2,12 @@
  * \brief 簡易ロギングのAPI
  */
 
+#include "elog.hpp"
+
 #include <cstdarg>
 #include <cstdlib>
 #include <iostream>
 #include <libgen.h>
-
-#include "elog.h"
 
 using namespace std;
 
@@ -335,6 +335,7 @@ static int logger_sample02(int argc, char **argv) {
    */
 }
 
+#ifdef USE_SUBCMD
 #include "subcmd.h"
 
 subcmd logger_cmap[] = {
@@ -343,3 +344,4 @@ subcmd logger_cmap[] = {
   { 0 },
 };
 
+#endif

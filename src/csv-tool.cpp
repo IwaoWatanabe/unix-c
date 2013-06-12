@@ -3,8 +3,7 @@
 #include <cerrno>
 #include <string>
 
-#include "subcmd.h"
-#include "csv.h"
+#include "csv.hpp"
 
 using namespace std;
 
@@ -94,8 +93,12 @@ test_csv01(int argc, char **argv)
   return EXIT_SUCCESS;
 }
 
+#ifdef USE_SUBCMD
+#include "subcmd.h"
+
 subcmd csv_cmap[] = {
   { "csv-copy", test_csv01, },
   { 0 },
 };
 
+#endif
