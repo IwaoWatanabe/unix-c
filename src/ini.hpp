@@ -31,6 +31,8 @@ namespace uc {
     virtual bool set_ini_filename(const char *file_name) = 0;
     /// 対象のiniファイル名を入手する
     virtual std::string get_ini_filename() { return ini_file; };
+    /// 指定するセクションが含まれるか診断する
+    virtual bool has_section(const char *name) = 0;
     /// 含まれるセッション名の一覧を入手する
     virtual void fetch_section_names(std::vector<std::string> &names) = 0;
     /// デフォルトのセッション名を設定する

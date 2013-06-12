@@ -192,6 +192,7 @@ namespace {
     bool set_ini_filename(const char *file_name);
     void set_section(const char *name);
     void set_default_section(const char *name);
+    bool has_section(const char *name);
     void fetch_section_names(std::vector<std::string> &names);
     void fetch_config_names(std::vector<std::string> &names, const char *section = 0);
     std::string get_config_value(const char *name, const char *section = 0);
@@ -233,6 +234,12 @@ namespace {
 
     ini_file = file_name;
     return true;
+  }
+
+  bool INI_LoaderImpl::has_section(const char *name) {
+    string sname(name);
+    map<string, map<string,string> >::iterator it = section_map.find(sname);
+    return it != section_map.end();
   }
 
   void INI_LoaderImpl::fetch_section_names(vector<string> &names)
