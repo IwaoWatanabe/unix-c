@@ -64,6 +64,9 @@ int main(int argc, char **argv) {
   extern subcmd date_cmap[];
   subcmd_add(date_cmap);
 
+  extern subcmd fileop_cmap[];
+  subcmd_add(fileop_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }

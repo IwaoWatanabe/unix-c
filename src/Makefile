@@ -58,6 +58,7 @@ APP04_OBJS += stdc.o
 APP04_OBJS += xwin.o 
 APP04_OBJS += xt-proc.o
 APP04_OBJS += awt.o awt-util.o SmeCascade.o
+APP04_OBJS += file-op.o
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF
