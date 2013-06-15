@@ -27,6 +27,7 @@ CXXFLAGS += -DUSE_READLINE
 LDFLAGS += -lreadline -lhistory
 endif
 LDFLAGS += -lncursesw
+LDFLAGS += -ldb
 
 VERSION=0.1
 RPMBASE=~/rpm/SOURCES
@@ -38,7 +39,10 @@ MYBINDIR=${PREFIX}
 MYDOCDIR=${PREFIX}/docs
 DESTDIR=
 
-all: $(ALL_MODULE)
+all: uc $(ALL_MODULE)
+
+uc:
+	test -L uc || ln -s . uc
 
 docs: 
 	doxygen

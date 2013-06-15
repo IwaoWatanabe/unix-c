@@ -2,7 +2,7 @@
  * \brief 簡易ロギングのAPI
  */
 
-#include "elog.hpp"
+#include "uc/elog.hpp"
 
 #include <cstdarg>
 #include <cstdlib>
