@@ -70,6 +70,9 @@ int main(int argc, char **argv) {
   extern subcmd lineop_cmap[];
   subcmd_add(lineop_cmap);
 
+  extern subcmd index_cmap[];
+  subcmd_add(index_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }
