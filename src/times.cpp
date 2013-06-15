@@ -2,33 +2,7 @@
  * \brief 時間操作関連のサンプルコード
  */
 
-#include <cstdio>
-#include <string>
-#include <sys/time.h>
-
-namespace uc {
-
-  /// 簡易時間計測ツール
-  class Time_recored {
-    const char *report_prefix;
-    struct timeval save_time;
-  public:
-    Time_recored(const char *prefix = "INFO: ") : 
-      report_prefix(prefix) { 
-      save_time.tv_sec = 0; save_time.tv_usec = 0;
-    }
-    
-    /// 時間計測の基準時間を記録
-    bool time_load();
-    /// ファイルの最終更新時間を入手する
-    bool file_mtime(const char *file_name);
-    /// 時間のテキスト表現を入手する
-    std::string time_text();
-
-    void time_report(const char *msg, FILE *fout, long counter = -1L);
-    void time_report(const char *msg, std::string &buf, long counter = -1L);
-  };
-};
+#include "datetime.hpp"
 
 #include <cstdio>
 #include <cerrno>
