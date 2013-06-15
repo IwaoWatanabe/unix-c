@@ -176,7 +176,37 @@ static int test_auto01(int argc, char **argv) {
 // --------------------------------------------------------------------------------
 
 extern "C" {
+
+  /** 末尾が合致しているか診断する
+   */
+  int ends_with(const char *target, const char *suffix) {
+    size_t len = strlen(target), slen = strlen(suffix);
+    if (len < slen) return 0;
+    return strcmp(target + len - slen, suffix) == 0;
+  }
   
+  /** 前後の空白テキストを除いた位置を返す。
+      末尾については \0 を差し込むので注意すること。
+      NULLを渡された場合は処理せずNULLを返す。
+   */
+  char *trim(char *t) {
+    if (!t) return t;
+
+    while (*t && isspace(*t)) t++;
+    char *rt = t;
+
+    t += strlen(rt) - 1;
+    while (t > rt && isspace(*t)) *t-- = 0;
+    return rt;
+  }
+
+  /// atoi でテキストを整数値に変換する
+  static int test_trim(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+      cerr << ">>"  << trim(argv[i]) << "<<" << endl;
+    }
+  }
+
   /// atoi でテキストを整数値に変換する
   static int test_atoi(int argc, char **argv) {
     int sum = 0;
@@ -377,6 +407,7 @@ subcmd stdc_cmap[] = {
   { "stdc-gettext", test_gettext, },
   { "stdc-langinfo", test_langinfo, },
   { "stdc-lconv", test_lconv, },
+  { "stdc-trim", test_trim, },
   { NULL, },
 };
 
