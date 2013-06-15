@@ -28,12 +28,9 @@ namespace uc {
     virtual void close_log();
   };
 
-  /// ログ出力の実装クラス
-  class ELog_Manager;
-
   /// ログを出力するクラス
   class ELog {
-    ELog_Manager *mgr;
+    void *mgr;
   public:
     /// ログレベル
     enum Level { F, E, W, N, I, A, D, T };

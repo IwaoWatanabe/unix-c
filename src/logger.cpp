@@ -106,7 +106,9 @@ namespace uc {
 };
 
 // --------------------------------------------------------------------------------
-namespace uc {
+namespace {
+
+  using namespace uc;
 
   /// ログを振り分ける操作を担当するクラス
   /*
@@ -202,9 +204,12 @@ namespace uc {
     int ct = app_log.vlog(buf.c_str(), ap);
     return ct;
   }
+};
+
+namespace uc {
 
   ELog::ELog() : mgr(0) { }
-  ELog::~ELog() { if (mgr) mgr->reopen(); }
+  ELog::~ELog() { if (mgr) ((ELog_Manager *)mgr)->reopen(); }
 
   void
   ELog::init_elog(const char *ident) {
@@ -220,7 +225,7 @@ namespace uc {
   ELog::elog(const char *format, ...) {
     va_list args;
     va_start(args, format);
-    int ct = mgr ? mgr->vlog(E, format, args) : 
+    int ct = mgr ? ((ELog_Manager *)mgr)->vlog(E, format, args) : 
       vfprintf(stderr,format, args);
     va_end(args);
     return ct;
@@ -231,7 +236,7 @@ namespace uc {
     if (!mgr) return 0;
     va_list args;
     va_start(args, format);
-    int ct = mgr ? mgr->vlog(level, format, args) : 
+    int ct = mgr ? ((ELog_Manager *)mgr)->vlog(level, format, args) : 
       vfprintf(stderr,format, args);
     va_end(args);
     return ct;
@@ -240,7 +245,7 @@ namespace uc {
   int
   ELog::velog(int level, const char *format, va_list args) {
     if (!mgr) return 0;
-    int ct = mgr ? mgr->vlog(level, format, args) : 
+    int ct = mgr ? ((ELog_Manager *)mgr)->vlog(level, format, args) : 
       vfprintf(stderr,format, args);
     return ct;
   }
