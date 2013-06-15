@@ -17,6 +17,10 @@ namespace uc {
     virtual ~File_Manager() { }
     /// ディレクトリであるか診断する
     virtual bool isdir(const char *dirpath) = 0;
+    /// 作業ディレクトリ名を入手する
+    virtual std::string getcwd() = 0;
+    /// 作業ディレクトリ名を変更する
+    virtual bool chdir(const char *dirpath) = 0;
     /// 再帰的にディレクトリを作成する。
     virtual bool mkdirs(const char *dirpath) = 0;
     /// 再帰的にディレクトリを削除する。空では削除できない
@@ -78,6 +82,8 @@ namespace uc {
     virtual ~File_Manager_Impl();
 
     bool isdir(const char *dirpath);
+    std::string getcwd();
+    bool chdir(const char *dirpath);
     bool mkdirs(const char *dirpath);
     int rmdirs(const char *dirpath);
     std::string basename(const char *path);
@@ -112,6 +118,7 @@ namespace uc {
 #include <cstring>
 #include <deque>
 #include <dirent.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <memory>
@@ -177,6 +184,38 @@ namespace uc {
     return dirp2;
   }
 
+  /**
+     何らかの理由で取り出せないときは空テキストが返る。
+   */
+  string File_Manager_Impl::getcwd() {
+    char *pbuf = 0, *p;
+    size_t plen = 1024;
+
+    while ((p = (char *)realloc(pbuf, plen)) != NULL) {
+      pbuf = p;
+      char *wd = ::getcwd(pbuf, plen);
+      if (wd == NULL) {
+	if (errno == ERANGE) { plen += 1024; continue; }
+	elog("getcwd ,%u:(%d):%s\n", plen, errno, strerror(errno));
+	free(pbuf);
+	return "";
+      }
+      string cwd(wd);
+      free(pbuf);
+      return cwd;
+    }
+
+    elog("realloc ,%u:(%d):%s\n",plen,errno,strerror(errno));
+    free(pbuf);
+    return "";
+  }
+
+  bool File_Manager_Impl::chdir(const char *dir) {
+    if (0 == ::chdir(dir)) return true;
+    elog("chdir %s:(%d):%s\n",dir,errno,strerror(errno));
+    return false;
+  }
+
   bool File_Manager_Impl::isdir(const char *dirpath) {
     struct stat sbuf;
     if (stat(dirpath, &sbuf) == 0) {
@@ -216,7 +255,7 @@ namespace uc {
     }
 
     if (errno != ENOENT) {
-      elog(W, "stat: %s (%d):%s\n", dirpath, errno, strerror(errno));
+      elog(W, "stat %s:(%d):%s\n", dirpath, errno, strerror(errno));
       return false;
     }
 
@@ -230,10 +269,10 @@ namespace uc {
     }
 
     if (mkdir(dirpath,0777) != 0) {
-      elog(W, "mkdir: %s:(%d):%s", dirpath, errno, strerror(errno));
+      elog(W, "mkdir %s:(%d):%s", dirpath, errno, strerror(errno));
       return false;
     }
-    elog(D, "mkdir: %s:%d\n", dirpath, len);
+    elog(D, "mkdir %s:%d\n", dirpath, len);
     
     return true;
   }
@@ -259,9 +298,9 @@ namespace uc {
     }
     
     for (;;) {
-      elog(T, "rmdir: %s\n", dirpath);
+      elog(T, "rmdir %s\n", dirpath);
       if (rmdir(dirpath) != 0) {
-	elog("rmdir: %s:(%d):%s\n", dirpath, errno, strerror(errno));
+	elog("rmdir %s:(%d):%s\n", dirpath, errno, strerror(errno));
 	return 1;
       }
       
@@ -283,17 +322,32 @@ namespace uc {
   */
   int File_Manager_Impl::remove_file(const char *filepath, bool recurce) {
 
-    if (!isdir(filepath)) {
-      if (unlink(filepath) != 0) {
-	elog("unlink: %s:(%d):%s\n", filepath, errno, strerror(errno));
+    struct stat sbuf;
+    /*
+      複製元のファイル属性を格納する構造体。
+      あとでタイムスタンプの転記にも利用する。
+     */
+    if (stat(filepath, &sbuf) != 0) {
+      elog("stat %s:(%d):%s\n",filepath,errno,strerror(errno));
+      return 1;
+    }
+
+    if (!S_ISDIR(sbuf.st_mode)) {
+      if (!S_ISREG(sbuf.st_mode)) {
+	elog(W, "not regular file:%s\n",filepath);
 	return 1;
       }
-      elog(D, "unlink: %s\n", filepath);
+
+      if (unlink(filepath) != 0) {
+	elog("unlink %s:(%d):%s\n", filepath, errno, strerror(errno));
+	return 1;
+      }
+      elog(D, "unlink %s\n", filepath);
       return 0;
     }
 
     if (!recurce) {
-      elog("directory not removed: %s\n",filepath);
+      elog("directory cannot remove(try recurce option): %s\n",filepath);
       return 1;
     }
 
@@ -301,10 +355,10 @@ namespace uc {
     const char *dirpath = filepath;
     DIR *dir = opendir(dirpath);
     if (dir == NULL) {
-      elog("opendir: %s:(%d):%s\n", dirpath, errno, strerror(errno));
+      elog("opendir %s:(%d):%s\n", dirpath, errno, strerror(errno));
       return 1;
     }
-    elog(T, "opendir: %s\n", dirpath);
+    elog(T, "opendir %s\n", dirpath);
     int rc = 0;
 
     struct dirent *ent;
@@ -329,17 +383,17 @@ namespace uc {
     }
 
     if (closedir(dir) == 0)
-      elog(T, "closedir: %s\n", dirpath);
+      elog(T, "closedir %s\n", dirpath);
     else {
-      elog("closedir: %s:(%d):%s\n", dirpath, errno, strerror(errno));
+      elog("closedir %s:(%d):%s\n", dirpath, errno, strerror(errno));
     }
 
     if (rc == 0) {
       // ここまでにエラーが生じていなければ、ディレクトリを削除する
       if (rmdir(dirpath) == 0)
-	elog(D, "rmdir: %s\n", dirpath);
+	elog(D, "rmdir %s\n", dirpath);
       else {
-	elog("rmdir: %s:(%d):%s\n", dirpath, errno, strerror(errno));
+	elog("rmdir %s:(%d):%s\n", dirpath, errno, strerror(errno));
 	rc = 2;
       }
     }
@@ -352,7 +406,7 @@ namespace uc {
   int File_Manager_Impl::copy_local_file(FILE *outfp, const char *src, long *outbytes) {
     FILE *infp = fopen(src,"r");
     if (!infp) {
-      elog("fopen soruce: %s:(%d):%s\n", src, errno, strerror(errno));
+      elog("fopen %s:(%d):%s\n", src, errno, strerror(errno));
       return 2;
     }
 
@@ -374,7 +428,7 @@ namespace uc {
       }
     }
     if (fclose(infp) != 0) {
-      elog("fclose source failed: %s:(%d):%s\n",src,errno,strerror(errno));
+      elog("fclose %s:(%d):%s\n",src,errno,strerror(errno));
       return 3;
     }
     return 0;
@@ -431,7 +485,7 @@ namespace uc {
       またディレクトリに残る .part ファイルは部分ファイルであることがわかる。
      */
     if (!outfp) {
-      elog("fopen outfile: %s:(%d):%s\n", part.c_str(), errno, strerror(errno));
+      elog("fopen %s,w:(%d):%s\n", part.c_str(), errno, strerror(errno));
       return 2;
     }
     long bytes = 0;
@@ -439,7 +493,7 @@ namespace uc {
     int rc = copy_local_file(outfp,src,&bytes);
 
     if (fclose(outfp) != 0) {
-      elog("fclose outfile failed: %s:(%d):%s\n", part.c_str(), errno,strerror(errno));
+      elog("fclose %s:(%d):%s\n", part.c_str(), errno,strerror(errno));
       rc = 3;
     }
 
@@ -451,18 +505,18 @@ namespace uc {
 	ubuf.actime = sbuf.st_atime;
 	ubuf.modtime = sbuf.st_mtime;
 	if (utime(dst, &ubuf) != 0) {
-	  elog(W, "timestamp copy failed: %s:(%d):%s\n",dst,errno,strerror(errno));
+	  elog(W, "timestamp copy %s:(%d):%s\n",dst,errno,strerror(errno));
 	}
 	return 0;
       }
-      elog("rename outfile failed: %s:(%d):%s\n",dst,errno,strerror(errno));
+      elog("rename %s:(%d):%s\n",dst,errno,strerror(errno));
       rc = 4;
     }
 
     if (unlink(part.c_str()) == 0)
       elog(T, "unlink %s\n", part.c_str());
     else {
-      elog(W, "unlink  outfile failed: %s:(%d):%s\n", part.c_str(),errno,strerror(errno));
+      elog(W, "unlink %s:(%d):%s\n", part.c_str(),errno,strerror(errno));
       rc = 5;
     }
     return rc;
@@ -484,10 +538,10 @@ namespace uc {
     const char *dirpath = srcdir;
     DIR *dir = opendir(dirpath);
     if (dir == NULL) {
-      elog("opendir failed: %s:(%d):%s\n", dirpath, errno, strerror(errno));
+      elog("opendir %s:(%d):%s\n", dirpath, errno, strerror(errno));
       return 1;
     }
-    elog(T, "opendir: %s\n", dirpath);
+    elog(T, "opendir %s\n", dirpath);
 
     size_t dirnlen = strlen(srcdir);
     char *fpath = (char *)malloc(dirnlen + max_file_name_len + 2);
@@ -510,7 +564,7 @@ namespace uc {
       }
       strcpy(fpath + dirnlen, ent->d_name);
       if (stat(fpath, &sbuf) != 0) {
-	elog("stat failed: %s:(%d):%s\n",fpath, errno, strerror(errno));
+	elog("stat %s:(%d):%s\n",fpath, errno, strerror(errno));
 	break;
       }
 
@@ -530,7 +584,7 @@ namespace uc {
     if (closedir(dir) == 0)
       elog(T, "closedir: %s\n", dirpath);
     else {
-      elog("closedir failed: %s:(%d):%s\n", dirpath, errno, strerror(errno));
+      elog("closedir %s:(%d):%s\n", dirpath, errno, strerror(errno));
     }
     
     while (!dirs.empty()) {
@@ -585,7 +639,7 @@ namespace uc {
 	}
 	return copy_directory(dst, src);
       }
-      elog("%s stat failed:(%d):%s\n",dst,errno,strerror(errno));
+      elog("stat %s:(%d):%s\n",dst,errno,strerror(errno));
       return 2;
     }
     
@@ -681,7 +735,7 @@ namespace uc {
     }
     
     if (errno != EXDEV) {
-      elog("move file failed: %s:(%d):%s\n", src, errno, strerror(errno));
+      elog("rename %s:(%d):%s\n", src, errno, strerror(errno));
       return 1;
     }
     rc = copy_regular_file(dst, src);
@@ -744,6 +798,19 @@ namespace uc {
     return 0;
   }
 
+  /** cd/getcwdの試験
+   */
+  static int cmd_pwd(int argc,char **argv) {
+
+    auto_ptr<File_Manager> fm(create_File_Manager());
+
+    if (argc > 1) fm->chdir(argv[1]);
+
+    string cwd = fm->getcwd();
+    cout << cwd << endl;
+    return cwd.size() > 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
+
   /** mkdirsの試験
    */
   static int cmd_mkdirs(int argc,char **argv) {
@@ -797,7 +864,7 @@ namespace uc {
       }
     }
 
-    if (optind <= 1) {
+    if (argc - optind < 1) {
       cerr << "usage: " << argv[0] << " [-r] <file> .." << endl;
       return 1;
     }
@@ -806,7 +873,7 @@ namespace uc {
     int rc = 0;
     
     for (int i = optind; i < argc; i++) {
-      int rc0 = fm->remove_file(argv[1], recurce);
+      int rc0 = fm->remove_file(argv[i], recurce);
       if(rc0) rc = rc0;
     }
     return rc;
@@ -863,6 +930,7 @@ namespace uc {
 subcmd fileop_cmap[] = {
   { "basename", uc::cmd_basename, },
   { "dirname", uc::cmd_dirname, },
+  { "pwd", uc::cmd_pwd, },
   { "mkdirs", uc::cmd_mkdirs, },
   { "rmdirs", uc::cmd_rmdirs, },
   { "rm", uc::cmd_remove_file, },
