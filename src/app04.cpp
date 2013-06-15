@@ -67,6 +67,9 @@ int main(int argc, char **argv) {
   extern subcmd fileop_cmap[];
   subcmd_add(fileop_cmap);
 
+  extern subcmd lineop_cmap[];
+  subcmd_add(lineop_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }
