@@ -39,13 +39,13 @@ namespace uc {
   };
 };
 
-namespace uc {
+namespace {
 
   /// オペレーションの確認用
   /**
      ファイルシステムに作用を伴う操作を行わない
    */
-  class File_Manager_Nop: public File_Manager, ELog {
+  class File_Manager_Nop: public uc::File_Manager, uc::ELog {
   public:
     virtual ~File_Manager_Nop() { }
     bool isdir(const char *dirpath);
@@ -62,7 +62,7 @@ namespace uc {
   /** それぞれの処理を並行して処理する場合は、
       固有の処理インスタンスを作成すること。
   */
-  class File_Manager_Impl: public File_Manager, ELog {
+  class File_Manager_Impl: public uc::File_Manager, uc::ELog {
 
     int copy_local_file(FILE *outfp, const char *src, long *outbytes);
     int copy_regular_file(const char *dst, const char *src);
@@ -128,7 +128,7 @@ namespace uc {
 
 using namespace std;
 
-namespace uc {
+namespace {
 
   File_Manager_Impl::File_Manager_Impl() {
     init_elog("fm");
