@@ -61,7 +61,8 @@ using namespace std;
 #include <fcntl.h>
 #include <sys/types.h>
 
-#include "elog.hpp"
+#include "uc/elog.hpp"
+#include "uc/datetime.hpp"
 
 extern "C" int ends_with(const char *target, const char *suffix);
 
@@ -311,7 +312,7 @@ namespace {
     if (rc)
       elog(W, "bdb->sync %s:(%d):%s\n", db_name.c_str(), rc, db_strerror(rc));
   }
-  
+
 
 };
 
@@ -333,11 +334,105 @@ namespace uc {
 
 #include "uc/all.hpp"
 
+
+extern "C" uc::Local_Text_Source *create_Local_Text_Source();
+extern "C" char *trim(char *t);
+
+namespace {
+
+  /// DBAの基本機能を確認するツール
+  class DBA_tool {
+    uc::Local_Text_Source *ts;
+
+  public:
+    DBA_tool(const char *path, const char *type) :
+      db(uc::DBA::get_dba_instance(path, type)), ts(create_Local_Text_Source()) { }
+    ~DBA_tool() { delete db; delete ts; }
+
+    uc::DBA *db;
+    int show_key_list();
+    int dump_key_values();
+    int import_key_values(const char *input_file);
+  };
+
+  /// 保持しているキー名を出力する
+  int DBA_tool::show_key_list() {
+    db->begin_next_key();
+    string key;
+    int ct = 0;
+    while (db->fetch_next_key(key)) {
+      cout << key << endl;
+      ct++;
+    }
+    db->end_next_key();
+    return ct;
+  }
+
+  /// 保持しているキー名とデータを出力する
+  int DBA_tool::dump_key_values() {
+    string key, value;
+    db->begin_next_key();
+    int ct = 0;
+    while (db->fetch_next_key(key)) {
+      if (db->fetch_value(key.c_str(), value)) {
+	cout << key << endl << value << endl << endl;
+	ct++;
+      }
+    }
+    db->end_next_key();
+    return ct;
+  }
+
+  /// ファイルからKVデータを読込み、DBAに登録する
+  int DBA_tool::import_key_values(const char *input_file) {
+
+    if (!ts->open_read_file(input_file)) return 1;
+
+    char *line;
+    int rc = 0;
+
+    // # で始まる行はコメント扱いとする
+    // key,value を交互の行を入力とする
+    // value の空行は削除を意味する
+
+    while((line = ts->read_line()) != 0) {
+      line = trim(line);
+      if (*line == '#' || !*line) continue;
+      /*
+	key の空行はスキップする。
+	つまり空行を数件入れると、
+	その次の空行でない行は必ずkeyとして扱われる
+      */
+
+      // cerr << "key read: >>" << line << "<<" << endl;
+      string keybuf(line);
+      /*
+	次の read_line の呼び出しで無効になるため複製している。
+      */
+
+      while ((line = ts->read_line()) != 0) {
+	line = trim(line);
+	if (*line != '#') break;
+      }
+
+      if (!line) break;
+
+      // cerr << "value read: >>" << line << "<<" << endl;
+
+      if (!db->put_value(keybuf.c_str(), line)) { rc = 1; break; }
+      /*
+	登録に失敗したら速やかに中断する
+      */
+    }
+
+    return rc;
+  }
+
+};
+
+// --------------------------------------------------------------------------------
+
 extern "C" {
-
-  extern char *trim(char *t);
-
-  extern uc::Local_Text_Source *create_Local_Text_Source();
 
   // awk -F: '{print $1;print $0}' < /etc/passwd > work/user-by-loginname.dump
   // awk -F: '{print $3;print $0}' < /etc/passwd > work/user-by-pid.dump
@@ -364,7 +459,7 @@ extern "C" {
       }
     }
 
-    auto_ptr<uc::DBA> db(uc::DBA::get_dba_instance(dir_path, dba_type));
+    auto_ptr<DBA_tool> tool(new DBA_tool(dir_path, dba_type));
 
     uc::Text_Source::set_locale(lang);
 
@@ -376,7 +471,7 @@ extern "C" {
        */
       vector<string> list;
       
-      db->get_dba_list(list);
+      tool->db->get_dba_list(list);
       vector<string>::iterator it = list.begin();
       for (;it != list.end(); it++) {
 	cout << *it << endl;
@@ -387,90 +482,28 @@ extern "C" {
 
     if (argc - optind <= 1) {
       const char *dbname = argv[optind];
-      if (!db->open_dba(dbname, "r")) return 1;
+      if (!tool->db->open_dba(dbname, "r")) return EXIT_FAILURE;
 
       if (show_key_list) {
-	/*
-	  保持しているキー名を出力する
-	*/
-	db->begin_next_key();
-	string key;
-	int ct = 0;
-
-	while (db->fetch_next_key(key)) {
-	  cout << key << endl;
-	  ct++;
-	}
-	db->end_next_key();
-
+	cerr << tool->show_key_list() << " keys registerd." << endl;
 	return EXIT_SUCCESS;
       }
       
+      cerr << tool->dump_key_values() << " entries dumped." << endl;
       /*
 	保持しているキー名とデータを出力する
        */
-      string key, value;
-      db->begin_next_key();
-
-      while (db->fetch_next_key(key)) {
-	if (db->fetch_value(key.c_str(), value)) {
-	  cout << key << endl << value << endl << endl;
-	}
-      }
-
-      db->end_next_key();
-
-      return 0;
+      return EXIT_SUCCESS;
     }
 
     // 以下、登録処理
-    // # で始まる行はコメント扱いとする
-    // key,value を交互の行を入力とする
-    // value の空行は削除を意味する
-
-    auto_ptr<uc::Local_Text_Source> ts(create_Local_Text_Source());
 
     const char *dbname = argv[optind];
     const char *input_file = argv[optind + 1];
-
     if (*mode == 'r') mode = "w";
-    if (!db->open_dba(dbname, mode)) return 1;
-    if (!ts->open_read_file(input_file)) return 1;
+    if (!tool->db->open_dba(dbname, mode)) return 1;
 
-    char *line;
-    int rc = 0;
-
-    while((line = ts->read_line()) != 0) {
-      line = trim(line);
-      if (*line == '#' || !*line) continue;
-      /*
-	key の空行はスキップする。
-	つまり空行を数件入れると、
-	その次の空行でない行は必ずkeyとして扱われる
-      */
-
-      // cerr << "key read: >>" << line << "<<" << endl;
-      string keybuf(line);
-      /*
-	次の read_line の呼び出しで無効になるため複製している。
-       */
-
-      while ((line = ts->read_line()) != 0) {
-	line = trim(line);
-	if (*line != '#') break;
-      }
-
-      if (!line) break;
-
-      // cerr << "value read: >>" << line << "<<" << endl;
-
-      if (!db->put_value(keybuf.c_str(), line)) { rc = 1; break; }
-      /*
-	登録に失敗したら速やかに中断する
-      */
-    }
-
-    return rc;
+    return tool->import_key_values(input_file);
   }
 
   /// Sennaのインデックスを構築する
