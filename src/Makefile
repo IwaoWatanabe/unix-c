@@ -28,6 +28,7 @@ LDFLAGS += -lreadline -lhistory
 endif
 LDFLAGS += -lncursesw
 LDFLAGS += -ldb
+LDFLAGS += -lqdbm
 LDFLAGS += -lmecab -lsenna
 
 VERSION=0.1

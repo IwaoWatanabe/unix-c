@@ -47,6 +47,10 @@ namespace uc {
     virtual void close_dba() = 0;
     /// データのストレージ同期
     virtual void sync_dba() = 0;
+    /// ストアの実装名とバージョン文字列を返す
+    virtual const char *get_dba_version() { return "DBA: 0.0"; }
+    /// ストアの状態をレポートする
+    virtual void show_report(FILE *fout);
   };
 };
 
@@ -181,13 +185,15 @@ using namespace std;
 
 #include <cerrno>
 #include <cstdlib>
-#include <db.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/types.h>
 
 #include "uc/elog.hpp"
 #include "uc/datetime.hpp"
+
+#include "db.h"
+#include "depot.h"
 #include "senna/senna.h"
 
 extern "C" int ends_with(const char *target, const char *suffix);
@@ -195,6 +201,7 @@ extern "C" int ends_with(const char *target, const char *suffix);
 /// 実装クラスを隠す
 namespace {
 
+  /// Berkeley DBを操作するDBA実装クラス
   class DBA_BDB_Impl : public uc::DBA, uc::ELog {
     DB *db;
     DBC *cursor;
@@ -215,6 +222,7 @@ namespace {
     void end_next_key();
     void close_dba();
     void sync_dba();
+    const char *get_dba_version();
   };
 
   DBA_BDB_Impl::DBA_BDB_Impl(const char *dir) : DBA(dir), db(0), cursor(0), db_mode(0) {
@@ -245,7 +253,7 @@ namespace {
     closedir(dp);
   }
 
-  static string bdb_name(string &dir_path, const char *dbname, const char *suffix = ".bdb") {
+  static string bdb_name(const string &dir_path, const char *dbname, const char *suffix = ".bdb") {
     string bdb_path(dir_path);
     bdb_path += "/";
     bdb_path += dbname;
@@ -269,6 +277,7 @@ namespace {
   int DBA_BDB_Impl::open_dba(const char *dbname, const char *mode) {
 
     int flag = 0;
+    const char *saved_mode = mode;
 
     while (*mode) {
       switch(*mode) {
@@ -302,14 +311,18 @@ namespace {
 
     rc = bdb->open(bdb, NULL, bdb_path.c_str(), NULL, DB_BTREE, flag, 0666);
     if (rc) {
-      elog("bdb->open %s,%0x:(%d):%s\n", bdb_path.c_str(), flag, rc, db_strerror(rc));
+      elog("bdb->open %s ,%s(%#0x):(%d):%s\n", bdb_path.c_str(), saved_mode, flag, rc, db_strerror(rc));
       return 0;
     }
+    elog(D, "%s ,%s(%#0x) opened.\n", bdb_path.c_str(), saved_mode, flag);
 
     if (db) {
+      // 前の接続がある場合は自動で閉じる
       rc = db->close(db, 0);
-      if (rc) elog(W, "bdb->close %s:(%d):%s\n", db_name.c_str(), rc, db_strerror(rc));
-      elog(W, "%s force closed.\n", db_name.c_str());
+      if (rc)
+	elog(W, "bdb->close %s:(%d):%s\n", db_name.c_str(), rc, db_strerror(rc));
+      else
+	elog(I, "%s force closed.\n", db_name.c_str());
     }
 
     db = bdb;
@@ -437,6 +450,228 @@ namespace {
     int rc = db->sync(db,0);
     if (rc)
       elog(W, "bdb->sync %s:(%d):%s\n", db_name.c_str(), rc, db_strerror(rc));
+  }
+
+  const char *DBA_BDB_Impl::get_dba_version() {
+    int major, minor, patch;
+    char *ver = db_version(&major, &minor, &patch);
+    return ver;
+  }
+  
+  // --------------------------------------------------------------------------------
+  // QDBMバージョン１基本仕様書
+  // http://fallabs.com/qdbm/spex-ja.html#depotapi
+
+  /// QDB(DEPOT)を操作するDBA実装クラス
+  class DBA_DEPOT_Impl : public uc::DBA, uc::ELog {
+    DEPOT* db;
+    string db_name;
+    int db_mode, bnum;
+
+  public:
+    DBA_DEPOT_Impl(const char *dir);
+    ~DBA_DEPOT_Impl();
+    void get_dba_list(std::vector<std::string> &list);
+    void drop_dba(const char *dbname);
+    int open_dba(const char *dbname, const char *mode);
+    bool fetch_value(const char *key, std::string &value);
+    bool put_value(const char *key, const char *value);
+    bool has_key(const char *key);
+    void begin_next_key();
+    bool fetch_next_key(std::string &key);
+    void end_next_key();
+    void close_dba();
+    void sync_dba();
+    const char *get_dba_version();
+  };
+
+  DBA_DEPOT_Impl::DBA_DEPOT_Impl(const char *dir)
+    : DBA(dir), db(0), db_mode(0), bnum(-1)
+  {
+    init_elog("dba-depot");
+  }
+
+  DBA_DEPOT_Impl::~DBA_DEPOT_Impl() {
+    close_dba();
+  }
+
+  void DBA_DEPOT_Impl::get_dba_list(std::vector<std::string> &list) {
+    DIR *dp;
+
+    if ((dp = opendir(db_dir_path.c_str())) == NULL) {
+      elog("opendir %s:(%d):%s\n", db_dir_path.c_str(), errno, strerror(errno));
+      return;
+    }
+
+    struct dirent *dir;
+
+    while ((dir = readdir(dp)) != NULL ){
+      if (!ends_with(dir->d_name, ".qdb")) continue;
+      string dname(dir->d_name);
+      if (dname[0] == '.') continue;
+      list.push_back(dname);
+    }
+
+    closedir(dp);
+  }
+
+  static string qdb_name(string &dir_path, const char *dbname, const char *suffix = ".qdb") {
+    return bdb_name(dir_path, dbname, suffix);
+  }
+
+  void DBA_DEPOT_Impl::drop_dba(const char *dbname) {
+    string dbpath = qdb_name(db_dir_path, dbname);
+    if (!unlink(dbpath.c_str())) {
+      elog("unlink %s:(%d):%s\n", dbpath.c_str(), errno, strerror(errno));
+    }
+  }
+
+  int DBA_DEPOT_Impl::open_dba(const char *dbname, const char *mode) {
+
+    // DP_OWRITER: 読み書き
+    // DP_OCREAT: ファイルが無い場合に新規作成する
+    // DP_OTRUNC: ファイルが存在しても作り直す
+    // DP_OSPARSE: ファイルをスパースにする
+
+    int flag = DP_OWRITER;
+    const char *saved_mode = mode;
+
+    while (*mode) {
+      switch(*mode) {
+      case 'c':
+	flag |= DP_OCREAT|DP_OTRUNC;
+	break;
+      case 'r':
+	flag &= ~DP_OWRITER;
+	break;
+      }
+      mode++;
+    }
+
+    /*
+      DP_OWRITER: （読み書き両用モード）でデータベースファイルを開く際には
+      そのファイルに対して排他ロックがかけられ、
+      DP_OREADER（読み込み専用モード）で開く際には共有ロックがかけられる。
+      その際には該当のロックがかけられるまで制御がブロックする。
+      DP_ONOLCK を指示する場合はこのロックを回避できるか、アプリケーションが排他制御の責任を負う。
+    */
+
+    if (db) {
+      if (db_name == dbname && db_mode == flag) {
+	// 前回の接続と同じであれば、開きなおさないで成功させる
+	elog(W, "%s already opened.\n", dbname);
+	return 0;
+      }
+    }
+
+    string qdb_path = qdb_name(db_dir_path, dbname);
+    DEPOT* qdb = dpopen(qdb_path.c_str(), flag, bnum);
+    if (!qdb) {
+      elog("dpopen %s ,%s(%#0x),%d:(%d):%s\n", qdb_path.c_str(), saved_mode, flag, bnum, dpecode, dperrmsg(dpecode));
+      return 0;
+    }
+
+    elog(D, "%s ,%s(%#0x) opened.\n", qdb_path.c_str(), saved_mode, flag);
+
+    if (db) {
+      // 前の接続がある場合は自動で閉じる
+      if (!dpclose(db))
+	elog(W, "dpclose %s:(%d):%s\n", db_name.c_str(), dpecode, dperrmsg(dpecode));
+      else
+	elog(I, "%s force closed.\n", db_name.c_str());
+    }
+    db = qdb;
+    db_name = dbname;
+    db_mode = flag;
+    return 1;
+  }
+
+  bool DBA_DEPOT_Impl::fetch_value(const char *key, std::string &value) {
+    if (!db) { value = ""; return false; }
+
+    int offset = 0, size = -1;
+    char *vstr = dpget(db, key, -1, offset, size, NULL);
+    if (!vstr) {
+      // 該当するレコードがない
+      value = "";
+      return false;
+    }
+    value = vstr;
+    free(vstr);
+    return true;
+  }
+
+  bool DBA_DEPOT_Impl::put_value(const char *key, const char *value) {
+    if (!db) return false;
+
+    if (!value || !*value) {
+      // 値が空であればエントリを削除する
+      int rc = dpout(db, key, -1);
+      if (!rc)
+	elog(W, "dpout %s,%s:(%d):%s\n", db_name.c_str(), key, dpecode, dperrmsg(dpecode));
+      return rc != 0;
+    }
+
+    if (!dpput(db, key, -1, value, -1, DP_DOVER)) {
+      // DP_DOVER: 既存のレコードの値を上書き
+      // DP_DKEEP: 既存のレコードを残してエラー
+      // DP_DCAT: 指定された値を既存の値の末尾に加える
+      elog("dpput %s,%s:(%d):%s\n", db_name.c_str(), key, dpecode, dperrmsg(dpecode));
+      return false;
+    }
+    return true;
+  }
+
+  bool DBA_DEPOT_Impl::has_key(const char *key) {
+    if (!db) return false;
+    int size = dpvsiz(db, key, -1);
+    return size > 0;
+  }
+
+  void DBA_DEPOT_Impl::begin_next_key() {
+    if (!db) return;
+    if (!dpiterinit(db)) {
+      elog("dpiterinit %s:(%d):%s\n", db_name.c_str(), dpecode, dperrmsg(dpecode));
+    }
+  }
+
+  bool DBA_DEPOT_Impl::fetch_next_key(std::string &key) {
+    if (!db) { key = ""; return false; }
+
+    char *dk = dpiternext(db, NULL);
+    if (!dk) { key = ""; return false; }
+    key = dk;
+    free(dk);
+    return true;
+  }
+
+  void DBA_DEPOT_Impl::end_next_key() {
+    // nothing
+  }
+
+  void DBA_DEPOT_Impl::close_dba() {
+    if (!db) return;
+
+    if (!dpclose(db))
+      elog(W, "dpclose %s:(%d):%s\n", db_name.c_str(), dpecode, dperrmsg(dpecode));
+
+    elog(D, "%s closed.\n", db_name.c_str());
+
+    db = 0;
+    db_name = "";
+    db_mode = 0;
+  }
+
+  void DBA_DEPOT_Impl::sync_dba() {
+    if (!db) return;
+    if (!dpsync(db))
+      elog(F, "dpsync %s:(%d):%s\n", db_name.c_str(), dpecode, dperrmsg(dpecode));
+  }
+
+  const char *DBA_DEPOT_Impl::get_dba_version() {
+    static char vbuf[20] = { 0 };
+    if (!vbuf[0]) snprintf(vbuf,sizeof vbuf,"QDBM:%s (Depot)",dpversion);
+    return vbuf;
   }
 
   // --------------------------------------------------------------------------------
@@ -1002,7 +1237,17 @@ namespace uc {
 
   DBA::DBA(const char *dir) : db_dir_path(dir) { }
 
+  void DBA::show_report(FILE *fout) {
+    fprintf(fout,"dba: %s\n", get_dba_version());
+  }
+
   DBA *DBA::get_dba_instance(const char *dir_path, const char *dba_type) {
+    if (strcasecmp(dba_type,"bdb") == 0)
+      return new DBA_BDB_Impl(dir_path);
+
+    if (strcasecmp(dba_type,"qdb") == 0 || strcasecmp(dba_type,"depot") == 0)
+      return new DBA_DEPOT_Impl(dir_path);
+
     return new DBA_BDB_Impl(dir_path);
   }
 
@@ -1108,7 +1353,10 @@ namespace {
 
       // cerr << "value read: >>" << line << "<<" << endl;
 
-      if (!db->put_value(keybuf.c_str(), line)) { rc = 1; break; }
+      if (!db->put_value(keybuf.c_str(), line)) {
+	fprintf(stderr,"Break Loop!\n");
+	rc = 1; break;
+      }
       /*
 	登録に失敗したら速やかに中断する
       */
@@ -1174,8 +1422,8 @@ extern "C" {
   // awk -F: '{print $3;print $0}' < /etc/passwd > work/user-by-pid.dump
 
 
-  /// Berkeley DBを操作してみる
-  int cmd_bdb01(int argc, char **argv) {
+  /// DBAオブジェクトを操作してみる
+  int cmd_dba01(int argc, char **argv) {
 
     const char *dir_path = "work";
     const char *dba_type = "bdb";
@@ -1185,13 +1433,15 @@ extern "C" {
     const char *lang = "";
     bool show_key_list = false;
 
-    while ((opt = getopt(argc,argv,"cD:kL:uv")) != -1) {
+    while ((opt = getopt(argc,argv,"cD:kL:T:uv")) != -1) {
       switch(opt) { 
       case 'c': mode = "c"; break;
       case 'u': mode = "w"; break;
       case 'k': show_key_list = true; break;
       case 'L': lang = optarg; break;
       case 'D': dir_path = optarg; break;
+      case 'T': dba_type = optarg; break;
+      case '?': return 1;
       }
     }
 
@@ -1200,7 +1450,7 @@ extern "C" {
     uc::Text_Source::set_locale(lang);
 
     if (argc - optind < 1) {
-      cerr << "usage: " << argv[0] << " [-c] <dbname> [source-file]" << endl;
+      cerr << "usage: " << argv[0] << " [-c][-k] <dbname> [source-file]" << endl;
       /*
 	データベースが指定されていないため、
 	定義済みデータベースの一覧を出力する。
@@ -1213,6 +1463,8 @@ extern "C" {
 	cout << *it << endl;
       }
       cout << list.size() << " databases found." << endl; 
+      tool->db->show_report(stderr);
+
       return EXIT_FAILURE;
     }
 
@@ -1265,7 +1517,7 @@ extern "C" {
 #include "subcmd.h"
 
 subcmd index_cmap[] = {
-  { "bdb", cmd_bdb01, },
+  { "bda", cmd_dba01, },
   { "index", cmd_index01, },
   { "search", cmd_search01, },
   { 0 },
