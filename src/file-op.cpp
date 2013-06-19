@@ -1,43 +1,10 @@
 /*! \file
- * \brief ファイルの基本操作をサポートするクラス
+ * \brief ローカル・ファイルの基本操作をサポートするクラス
  */
 
-#include <cstdlib>
-#include <string>
+#include "uc/local-file.hpp"
+#include "uc/elog.hpp"
 #include <vector>
-
-#include "elog.hpp"
-
-namespace uc {
-
-  /// ファイルの基本操作をサポートする
-  class File_Manager {
-  public:
-    File_Manager() { }
-    virtual ~File_Manager() { }
-    /// ディレクトリであるか診断する
-    virtual bool isdir(const char *dirpath) = 0;
-    /// 作業ディレクトリ名を入手する
-    virtual std::string getcwd() = 0;
-    /// 作業ディレクトリ名を変更する
-    virtual bool chdir(const char *dirpath) = 0;
-    /// 再帰的にディレクトリを作成する。
-    virtual bool mkdirs(const char *dirpath) = 0;
-    /// 再帰的にディレクトリを削除する。空では削除できない
-    virtual int rmdirs(const char *dirpath) = 0;
-    /// パスのファイル名部を得る
-    virtual std::string basename(const char *path) = 0;
-    /// パスのディレクトリ部を得る
-    virtual std::string dirname(const char *path) = 0;
-
-    /// 一般ファイルを削除する
-    virtual int remove_file(const char *filepath, bool recurce) = 0;
-    /// 一般ファイルを複製する
-    virtual int copy_file(const char *dst, const char * const *src, size_t src_count, bool recurce) = 0;
-    /// 一般ファイルを移動する
-    virtual int move_file(const char *dst, const char * const *src, size_t src_count) = 0;
-  };
-};
 
 namespace {
 
@@ -45,9 +12,9 @@ namespace {
   /**
      ファイルシステムに作用を伴う操作を行わない
    */
-  class File_Manager_Nop: public uc::File_Manager, uc::ELog {
+  class Local_File_Nop: public uc::Local_File, uc::ELog {
   public:
-    virtual ~File_Manager_Nop() { }
+    virtual ~Local_File_Nop() { }
     bool isdir(const char *dirpath);
     bool mkdirs(const char *dirpath);
     int rmdirs(const char *dirpath);
@@ -62,7 +29,7 @@ namespace {
   /** それぞれの処理を並行して処理する場合は、
       固有の処理インスタンスを作成すること。
   */
-  class File_Manager_Impl: public uc::File_Manager, uc::ELog {
+  class Local_File_Impl : public uc::Local_File, uc::ELog {
 
     int copy_local_file(FILE *outfp, const char *src, long *outbytes);
     int copy_regular_file(const char *dst, const char *src);
@@ -75,11 +42,11 @@ namespace {
     /*
       相対パスは通常のワークディレクトリとして処理する
      */
-    File_Manager_Impl();
+    Local_File_Impl();
 
     /// 相対パスを渡して処理するときの、基準ディレクトリを指定して初期化する
-    File_Manager_Impl(const char *base_dir);
-    virtual ~File_Manager_Impl();
+    Local_File_Impl(const char *base_dir);
+    virtual ~Local_File_Impl();
 
     bool isdir(const char *dirpath);
     std::string getcwd();
@@ -128,16 +95,34 @@ namespace {
 
 using namespace std;
 
+extern "C" uc::Local_Text_Source *create_Local_Text_Source();
+
+namespace uc {
+
+  Local_File::~Local_File() { }
+
+  /**
+     指定するファイルが存在しないか、
+     権限がなくてアクセスできない場合は インスタンスを返さない。
+   */
+  Local_Text_Source *Local_File::create_Text_Source(const char *name) {
+    Local_Text_Source *src = create_Local_Text_Source();
+    if (src->open_read_file(file_name)) { delete src; src = 0;}
+    return src;
+  }
+
+};
+
 namespace {
 
-  File_Manager_Impl::File_Manager_Impl() {
+  Local_File_Impl::Local_File_Impl() {
     init_elog("fm");
   }
 
-  File_Manager_Impl::~File_Manager_Impl() { }
+  Local_File_Impl::~Local_File_Impl() { }
 
   /// パスの最後の構成要素を返す
-  string File_Manager_Impl::basename(const char *path) {
+  string Local_File_Impl::basename(const char *path) {
     if (!path || !*path) return ".";
 
     size_t len = strlen(path);
@@ -158,7 +143,7 @@ namespace {
   }
 
   /// パスのディレクトリ部を返す
-  string File_Manager_Impl::dirname(const char *path) {
+  string Local_File_Impl::dirname(const char *path) {
 
     if (!path || !*path) return ".";
 
@@ -187,7 +172,7 @@ namespace {
   /**
      何らかの理由で取り出せないときは空テキストが返る。
    */
-  string File_Manager_Impl::getcwd() {
+  string Local_File_Impl::getcwd() {
     char *pbuf = 0, *p;
     size_t plen = 1024;
 
@@ -210,13 +195,13 @@ namespace {
     return "";
   }
 
-  bool File_Manager_Impl::chdir(const char *dir) {
+  bool Local_File_Impl::chdir(const char *dir) {
     if (0 == ::chdir(dir)) return true;
     elog("chdir %s:(%d):%s\n",dir,errno,strerror(errno));
     return false;
   }
 
-  bool File_Manager_Impl::isdir(const char *dirpath) {
+  bool Local_File_Impl::isdir(const char *dirpath) {
     struct stat sbuf;
     if (stat(dirpath, &sbuf) == 0) {
       // アクセスできるエントリが存在する
@@ -230,7 +215,7 @@ namespace {
   /**
      @return ディレクトリでないエントリが存在するか、作成できなかった場合にfalse
   */
-  bool File_Manager_Impl::mkdirs(const char *dirpath) {
+  bool Local_File_Impl::mkdirs(const char *dirpath) {
     if (!dirpath) return false;
 
     int len = strlen(dirpath);
@@ -283,7 +268,7 @@ namespace {
      削除できる権限がないと失敗する。
   */
 
-  int File_Manager_Impl::rmdirs(const char *dirpath) {
+  int Local_File_Impl::rmdirs(const char *dirpath) {
     int len = strlen(dirpath);
     if (!len) {
       elog(W, "empty directory name\n");
@@ -320,7 +305,7 @@ namespace {
     ファイルやディレクトリを削除する。
     対象のアクセス権がなければ削除できない。
   */
-  int File_Manager_Impl::remove_file(const char *filepath, bool recurce) {
+  int Local_File_Impl::remove_file(const char *filepath, bool recurce) {
 
     struct stat sbuf;
     /*
@@ -403,7 +388,7 @@ namespace {
   // --------------------------------------------------------------------------------
 
   /// ファイルの複製を作る
-  int File_Manager_Impl::copy_local_file(FILE *outfp, const char *src, long *outbytes) {
+  int Local_File_Impl::copy_local_file(FILE *outfp, const char *src, long *outbytes) {
     FILE *infp = fopen(src,"r");
     if (!infp) {
       elog("fopen %s:(%d):%s\n", src, errno, strerror(errno));
@@ -440,7 +425,7 @@ namespace {
      複製元のファイルのタイムスタンプと合わせる
      複製先が存在してディレクトリであれば、そのディレクトリに同名で複製する。
   */
-  int File_Manager_Impl::copy_regular_file(const char *dst, const char *src) {
+  int Local_File_Impl::copy_regular_file(const char *dst, const char *src) {
     if (!src || !*src || !dst || !*dst) {
       elog(W, "empty copy target");
       return 1;
@@ -526,7 +511,7 @@ namespace {
   /*
     複製元、複製先はいずれも存在するディレクトリである必要がある。
   */
-  int File_Manager_Impl::copy_directory(const char *dstdir, const char *srcdir) {
+  int Local_File_Impl::copy_directory(const char *dstdir, const char *srcdir) {
     if (!isdir(srcdir)) {
       elog("not directory: %s\n",srcdir);
       return 1;
@@ -612,7 +597,7 @@ namespace {
     ただしディレクトリを複製する場合、
     対象の名称のディレクトリがあると、それの中に複製される。
   */
-  int File_Manager_Impl::copy_file_or_directory(const char *dst, const char *src, bool recurce) {
+  int Local_File_Impl::copy_file_or_directory(const char *dst, const char *src, bool recurce) {
     // 複製元が１個の場合は、複製先がなくてもよい
 
     struct stat sbuf;
@@ -665,7 +650,7 @@ namespace {
   /*
     ディレクトリも複製対象とする場合は, recurceにtrueを渡す必要がある。
   */
-  int File_Manager_Impl::copy_file(const char *dst, const char * const *src, size_t count, bool recurce) {
+  int Local_File_Impl::copy_file(const char *dst, const char * const *src, size_t count, bool recurce) {
     if (!dst || !src || !count) {
       elog(W, "invalid argument: copy_file");
       return 1;
@@ -727,7 +712,7 @@ namespace {
      その場合は複製元のファイルのタイムスタンプを合わせようとする
      移動先が存在してディレクトリであれば、そのディレクトリに移動する。
   */
-  int File_Manager_Impl::move_regular_file(const char *dst, const char *src) {
+  int Local_File_Impl::move_regular_file(const char *dst, const char *src) {
     int rc = rename(src, dst);
     if (rc == 0) {
       elog(D, "move to %s\n", dst);
@@ -750,7 +735,7 @@ namespace {
   }
 
   /// 一般ファイルを移動する
-  int File_Manager_Impl::move_file(const char *dst, const char * const *src, size_t src_count) {
+  int Local_File_Impl::move_file(const char *dst, const char * const *src, size_t src_count) {
     elog("NOT IMPLEMENTED YET.\n");
     return 0;
   }
@@ -763,8 +748,8 @@ namespace {
 
 namespace uc {
 
-  static File_Manager *create_File_Manager() {
-    return new File_Manager_Impl();
+  static Local_File *create_Local_File() {
+    return new Local_File_Impl();
   }
 
   /// ディレクトリ名入手のテスト
@@ -774,7 +759,7 @@ namespace uc {
       return 1;
     }
 
-    auto_ptr<File_Manager> fm(create_File_Manager());
+    auto_ptr<Local_File> fm(create_Local_File());
 
     for (int i = 1; i < argc; i++) {
       cout << fm->basename(argv[i]) << endl;
@@ -790,7 +775,7 @@ namespace uc {
       return 1;
     }
 
-    auto_ptr<File_Manager> fm(create_File_Manager());
+    auto_ptr<Local_File> fm(create_Local_File());
 
     for (int i = 1; i < argc; i++) {
       cout << fm->dirname(argv[i]) << endl;
@@ -802,7 +787,7 @@ namespace uc {
    */
   static int cmd_pwd(int argc,char **argv) {
 
-    auto_ptr<File_Manager> fm(create_File_Manager());
+    auto_ptr<Local_File> fm(create_Local_File());
 
     if (argc > 1) fm->chdir(argv[1]);
 
@@ -820,7 +805,7 @@ namespace uc {
       return 1;
     }
 
-    auto_ptr<File_Manager> fm(create_File_Manager());
+    auto_ptr<Local_File> fm(create_Local_File());
 
     for (int i = 1; i < argc; i++) {
       if (fm->mkdirs(argv[i]))
@@ -838,7 +823,7 @@ namespace uc {
       return 1;
     }
 
-    auto_ptr<File_Manager> fm(create_File_Manager());
+    auto_ptr<Local_File> fm(create_Local_File());
 
     int rc = 0;
     for (int i = 1; i < argc; i++) {
@@ -869,7 +854,7 @@ namespace uc {
       return 1;
     }
 
-    auto_ptr<File_Manager> fm(create_File_Manager());
+    auto_ptr<Local_File> fm(create_Local_File());
     int rc = 0;
     
     for (int i = optind; i < argc; i++) {
@@ -892,7 +877,7 @@ namespace uc {
     }
 
     if (argc - optind > 1) {
-      auto_ptr<File_Manager> fm(create_File_Manager());
+      auto_ptr<Local_File> fm(create_Local_File());
       return fm->copy_file(argv[argc - 1], argv + optind, argc - optind - 1, recurce);
     }
     
@@ -909,7 +894,7 @@ namespace uc {
       switch(opt) { case 'v': verbose = true; }
     }
 
-    auto_ptr<File_Manager> fm(create_File_Manager());
+    auto_ptr<Local_File> fm(create_Local_File());
 
     if (argc - optind > 1) {
       return fm->move_file(argv[argc - 1], argv + optind, argc - optind - 1);
