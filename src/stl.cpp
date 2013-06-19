@@ -65,6 +65,8 @@ static void show_vector(vector<int> &aa, const char *sep = ", ") {
   }
 }
 
+static int pow2(int t) { return t * t; }
+
 /// std::vector の振る舞いの確認
 /**
   配列のように振る舞うコンテナ。
@@ -153,7 +155,36 @@ static int vector01(int argc, char **argv) {
   show_vector(aa);
   putchar('\n');
 
-  
+
+  vector<int>::iterator min01, max02;
+  min01 = min_element(aa.begin(), aa.end());
+  max02 = max_element(aa.begin(), aa.end());
+  printf("min:%d max:%d\n", *min01, *max02);
+
+  reverse(aa.begin(), aa.end());
+  show_vector(aa);
+  putchar('\n');
+
+  random_shuffle(aa.begin(), aa.end());
+  show_vector(aa);
+  putchar('\n');
+
+  vector<int> dd;
+  copy(aa.begin(), aa.end(), back_inserter(dd));
+  /*
+    ddの末尾に追記する
+   */
+  show_vector(dd);
+  putchar('\n');
+
+  transform(aa.begin(), aa.end(), back_inserter(dd), pow2);
+  /*
+    ddの末尾に加工した値を追記する
+   */
+  show_vector(dd);
+  putchar('\n');
+
+
   aa.clear();
   /*
     要素をクリアする
