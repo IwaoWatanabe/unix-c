@@ -31,6 +31,10 @@ LDFLAGS += -ldb
 LDFLAGS += -lqdbm
 LDFLAGS += -lmecab -lsenna
 
+LIBXML_CFLAGS = 
+CXXFLAGS += `xml2-config --cflags`
+LDFLAGS += `xml2-config --libs`
+
 VERSION=0.1
 RPMBASE=~/rpm/SOURCES
 
@@ -67,6 +71,7 @@ APP04_OBJS += awt.o awt-util.o SmeCascade.o
 APP04_OBJS += file-op.o
 APP04_OBJS += lineread.o
 APP04_OBJS += index.o
+APP04_OBJS += xml.o
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF

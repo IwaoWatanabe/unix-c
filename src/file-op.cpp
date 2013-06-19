@@ -105,7 +105,7 @@ namespace uc {
      指定するファイルが存在しないか、
      権限がなくてアクセスできない場合は インスタンスを返さない。
    */
-  Local_Text_Source *Local_File::create_Text_Source(const char *name) {
+  Local_Text_Source *Local_File::create_Text_Source(const char *file_name) {
     Local_Text_Source *src = create_Local_Text_Source();
     if (src->open_read_file(file_name)) { delete src; src = 0;}
     return src;
