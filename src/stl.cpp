@@ -49,6 +49,68 @@ static int string01(int argc, char **argv) {
   return 0;
 }
 
+/// 文字列の置換
+/*
+  targeに存在するkeyがreplacedに置き換わる。
+  find と replace を利用して置換を実現
+ */
+extern int replace(string &target, const char *key, const char *replaced) {
+
+  string::size_type pos = 0;
+  int klen = strlen(key), rlen = strlen(replaced);
+  int ct = 0;
+
+  while(pos = target.find(key, pos), pos != string::npos) {
+    target.replace(pos, klen, replaced);
+    pos += rlen;
+    ct++;
+  }
+  return ct;
+}
+
+/// std::string の単純置換の実験
+static int string_replace(int argc, char **argv) {
+  if (argc <= 3) {
+    // ./app stl-replace abc012abc012abc012 012 defg
+    fprintf(stderr, "usage: %s <target-text> <key> <replace>\n", argv[0]);
+    return 1;
+  }
+  string target(argv[1]);
+  const char *key = argv[2];
+  const char *replaced = argv[3];
+  int ct = replace(target, key, replaced);
+
+  printf("%s\nKey: %s\nReplace: %s\n", target.c_str(), key, replaced);
+  fprintf(stderr,"%d times replaced.\n", ct);
+  return 0;
+}
+
+/// コマンドライン・シェル向けのパラメータ文字列に置き換える
+
+extern string as_shell_params(int argc, char **argv) {
+  string buf;
+  const char *sep = "";
+
+  for (int i = 0; i < argc; i++) {
+    string tbuf(argv[i]);
+
+    replace(tbuf,"\\","\\\\");
+    //    replace(tbuf, "$", "\\$");
+    replace(tbuf,"\"","\\\"");
+    if (tbuf.find(" ") != string::npos)
+      tbuf.insert(0,"\"").append("\"");
+    buf.append(sep).append(tbuf);
+    sep = " ";
+  }
+  return buf;
+}
+
+/// std::string の単純置換の実験
+static int string_shell(int argc, char **argv) {
+  printf("%s\n", as_shell_params(argc,argv).c_str());
+  return 0;
+}
+
 // --------------------------------------------------------------------------------
 
 /// 要素の内容を出力する
@@ -334,6 +396,8 @@ static int set01(int argc, char **argv) {
 
 subcmd stl_cmap[] = {
   { "stl-str01", string01 },
+  { "stl-replace", string_replace },
+  { "stl-shell", string_shell },
   { "stl-vec01", vector01 },
   { "stl-set01", set01 },
   { "stl-map01", map01 },
