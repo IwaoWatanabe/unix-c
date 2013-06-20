@@ -41,8 +41,8 @@ namespace uc {
     virtual const char *get_source_name() { return ""; }
 
     int get_counter() { return counter; }
-    int countup() { counter++; }
-    Text_Source() : fp(0), buf_len(0), logger(0), counter(0) { buf.ptr = 0; }
+    int countup() { return counter++; }
+    Text_Source() : buf_len(0), fp(0), logger(0), counter(0) { buf.ptr = 0; }
 
   public:
     /// 文字セット操作の現在のlocale設定を入手
@@ -102,6 +102,8 @@ namespace uc {
 
     /// ファイルの読み込みを開始する
     virtual bool open_read_file(const char *file_name);
+    virtual bool open_read_ffile(const char *file_pattern, ...);
+    virtual bool open_read_vffile(const char *file_pattern, va_list ap);
     virtual long close_source();
 
     /// 想定するテキストのエンコーディングを指定する
@@ -122,6 +124,8 @@ namespace uc {
     ~Command_Text_Source();
     /// コマンドを呼出読み込みを開始する
     virtual bool open_pipe(const char *command_line);
+    virtual bool open_fpipe(const char *pattern, ...);
+    virtual bool open_vfpipe(const char *pattern, va_list ap);
     virtual long close_source();
     /// 想定するテキストのエンコーディングを指定する
     virtual void set_encoding(const char *enc);

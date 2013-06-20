@@ -6,7 +6,15 @@
 
 using namespace std;
 
+#include <cstdarg>
+#include <cstdlib>
 #include <clocale>
+
+// --------------------------------------------------------------------------------
+
+extern string as_shell_params(int argc, char **argv);
+extern int sprintf(string &buf, const char *format, ...);
+extern int vsprintf(string &buf, const char *format, va_list ap);
 
 // --------------------------------------------------------------------------------
 
@@ -142,6 +150,23 @@ namespace uc {
     return true;
   }
 
+  bool Local_Text_Source::open_read_ffile(const char *format, ...) {
+    string buf;
+    va_list ap;
+    va_start(ap, format);
+    int n = vsprintf(buf, format, ap);
+    va_end(ap);
+    if (n == 0) return false;
+    return open_read_file(buf.c_str());
+  }
+
+  bool Local_Text_Source::open_read_vffile(const char *format, va_list ap) {
+    string buf;
+    int n = vsprintf(buf, format, ap);
+    if (n == 0) return false;
+    return open_read_file(buf.c_str());
+  }
+
   long Local_Text_Source::close_source() {
     FILE *fp = get_stream();
     if (!fp) return get_counter();
@@ -185,6 +210,23 @@ namespace uc {
     return true;
   }
 
+  bool Command_Text_Source::open_fpipe(const char *format, ...) {
+    string buf;
+    va_list ap;
+    va_start(ap, format);
+    int n = vsprintf(buf, format, ap);
+    va_end(ap);
+    if (n == 0) return false;
+    return open_pipe(buf.c_str());
+  }
+
+  bool Command_Text_Source::open_vfpipe(const char *format, va_list ap) {
+    string buf;
+    int n = vsprintf(buf, format, ap);
+    if (n == 0) return false;
+    return open_pipe(buf.c_str());
+  }
+
   long Command_Text_Source::close_source() {
     FILE *fp = get_stream();
     if (!fp) return get_counter();
@@ -209,7 +251,6 @@ namespace uc {
 #include <memory>
 #include <iostream>
 
-extern string as_shell_params(int argc, char **argv);
 
 extern "C" {
 
@@ -309,7 +350,7 @@ extern "C" {
 
     ts->set_locale(lang);
 
-    if (!ts->open_pipe(cmd.c_str())) return 1;
+    if (!ts->open_fpipe("time %s", cmd.c_str())) return 1;
 
     char *line;
     size_t len;

@@ -3,6 +3,7 @@
  */
 
 #include <algorithm>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -108,6 +109,44 @@ extern string as_shell_params(int argc, char **argv) {
 /// std::string の単純置換の実験
 static int string_shell(int argc, char **argv) {
   printf("%s\n", as_shell_params(argc,argv).c_str());
+  return 0;
+}
+
+/// std::string に書式付き出力
+extern int vsprintf(string &buf, const char *format, va_list ap) {
+  buf.resize(128);
+  for(;;) {
+    va_list ap2;
+    va_copy(ap2, ap);
+    int n = vsnprintf((char *)buf.data(), buf.size(), format, ap2);
+    va_end(ap2);
+
+    if (n <= buf.size()) { buf.resize(n); return n; }
+    buf.resize( buf.size() * 2);
+    /*
+      サイズを拡張してリトライ
+     */
+  }
+}
+
+/// std::string に書式付き出力
+extern int sprintf(string &buf, const char *format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  int n = vsprintf(buf, format, ap);
+  va_end(ap);
+  return n;
+}
+
+static int cmd_string_sprintf(int argc, char **argv) {
+  string buf;
+
+  sprintf(buf, "%s:%s:%s", "AAA","BBB","CCC");
+  puts(buf.c_str());
+
+  sprintf(buf, "%d:%#x:%i", 111, 222, 333);
+  puts(buf.c_str());
+
   return 0;
 }
 
@@ -398,6 +437,7 @@ subcmd stl_cmap[] = {
   { "stl-str01", string01 },
   { "stl-replace", string_replace },
   { "stl-shell", string_shell },
+  { "stl-sprintf", cmd_string_sprintf },
   { "stl-vec01", vector01 },
   { "stl-set01", set01 },
   { "stl-map01", map01 },
