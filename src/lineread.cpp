@@ -123,18 +123,84 @@ namespace uc {
     その場合は、前のストリームを自動で閉じる。
    */
   bool Local_Text_Source::open_read_file(const char *file_name) {
-    FILE *fp = fopen(file_name, "r");
-    if (!fp) {
-      elog("fopen %s,r:(%d):%s\n",file_name,errno,strerror(errno));
-      return false;
-    }
 
+    FILE *fp;
+
+    if (strcmp(file_name,"-") == 0)
+      fp = stdin;
+    else {
+      fp = fopen(file_name, "r");
+      if (!fp) {
+	elog("fopen %s,r:(%d):%s\n",file_name,errno,strerror(errno));
+	return false;
+      }
+    }
     close_source();
 
     this->file_name = file_name;
     set_stream(fp);
     return true;
   }
+
+  long Local_Text_Source::close_source() {
+    FILE *fp = get_stream();
+    if (!fp) return get_counter();
+
+    if (this->file_name != "-" && 0 != fclose(fp)) {
+      /*
+	標準入力を対象としている場合は閉じる処理をしない。
+       */
+      if (logger) {
+	const char *last_source = get_source_name();
+	logger->elog(ELog::W, "fclose %s:(%d):%\n", last_source, errno, strerror(errno));
+      }
+    }
+    set_stream(NULL);
+    return get_counter();
+  }
+
+};
+
+// --------------------------------------------------------------------------------
+
+namespace uc {
+
+  /// コマンドを動かして、その出力をテキストとして読み込む
+  Command_Text_Source::Command_Text_Source() { }
+  Command_Text_Source::~Command_Text_Source() { }
+
+  /// コマンドを呼び出し、読み込みを開始する
+  bool Command_Text_Source::open_pipe(const char *command_line) {
+
+    FILE *fp = popen(command_line, "r");
+    if (!fp) {
+      elog("popen %s,r:(%d):%s\n", command_line, errno, strerror(errno));
+      return false;
+    }
+
+    close_source();
+
+    this->command_line = command_line;
+    set_stream(fp);
+    return true;
+  }
+
+  long Command_Text_Source::close_source() {
+    FILE *fp = get_stream();
+    if (!fp) return get_counter();
+
+    if (0 != pclose(fp)) {
+      if (logger) {
+	const char *last_source = get_source_name();
+	logger->elog(ELog::W, "pclose %s:(%d):%\n", last_source, errno, strerror(errno));
+      }
+    }
+    set_stream(NULL);
+    return get_counter();
+  }
+
+  /// 想定するテキストのエンコーディングを指定する
+  void Command_Text_Source::set_encoding(const char *enc) { }
 
 };
 
@@ -143,10 +209,16 @@ namespace uc {
 #include <memory>
 #include <iostream>
 
+extern string as_shell_params(int argc, char **argv);
+
 extern "C" {
 
   uc::Local_Text_Source *create_Local_Text_Source() {
     return new uc::Local_Text_Source();
+  }
+
+  uc::Command_Text_Source *create_Command_Text_Source() {
+    return new uc::Command_Text_Source();
   }
 
   /// テキスト・ファイルの行読み込みのテスト
@@ -218,6 +290,36 @@ extern "C" {
       cerr << "INFO: read " << argv[i] << " " << lines << " lines." << endl;
     }
   }
+
+  /// ホストコマンドを呼び出す（popenの振舞の実験）
+  static int cmd_host(int argc, char **argv) {
+    int opt;
+    bool verbose = false;
+    char *lang = "";
+
+    while ((opt = getopt(argc,argv,"L:v")) != -1) {
+      switch(opt) { 
+      case 'v': verbose = true; break;
+      case 'L': lang = optarg; break;
+      }
+    }
+
+    string cmd = as_shell_params(argc - optind, argv + optind);
+    auto_ptr<uc::Command_Text_Source> ts(create_Command_Text_Source());
+
+    ts->set_locale(lang);
+
+    if (!ts->open_pipe(cmd.c_str())) return 1;
+
+    char *line;
+    size_t len;
+
+    while((line = ts->read_line(&len)) != 0) {
+      cout << line;
+    }
+
+    return 0;
+  }
 };
 
 // --------------------------------------------------------------------------------
@@ -227,6 +329,7 @@ extern "C" {
 
 subcmd lineop_cmap[] = {
   { "line-read", cmd_text_read, },
+  { "host", cmd_host, },
   { 0 },
 };
 

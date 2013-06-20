@@ -102,10 +102,29 @@ namespace uc {
 
     /// ファイルの読み込みを開始する
     virtual bool open_read_file(const char *file_name);
+    virtual long close_source();
 
     /// 想定するテキストのエンコーディングを指定する
     virtual void set_encoding(const char *enc);
 
+    /// 想定するテキストのエンコーディングを入手する
+    virtual const char * get_encoding() { return encoding.c_str(); }
+  };
+
+  /// コマンドを動かして、その出力をテキストとして読み込む
+  class Command_Text_Source : public Text_Source, ELog {
+    std::string command_line, encoding;
+
+    virtual const char *get_source_name() { return command_line.c_str(); }
+
+  public:
+    Command_Text_Source();
+    ~Command_Text_Source();
+    /// コマンドを呼出読み込みを開始する
+    virtual bool open_pipe(const char *command_line);
+    virtual long close_source();
+    /// 想定するテキストのエンコーディングを指定する
+    virtual void set_encoding(const char *enc);
     /// 想定するテキストのエンコーディングを入手する
     virtual const char * get_encoding() { return encoding.c_str(); }
   };
