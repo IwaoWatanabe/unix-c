@@ -9,35 +9,8 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <gdbm.h>
 
-extern "C" {
-
-#ifdef HAVA_NDBM_H
-#include <ndbm.h>
-#else
-
-#ifndef DBM_INSERT
-#define DBM_INSERT 0
-#endif
-
-#ifndef DBM_REPLACE
-#define DBM_REPLACE 1
-#endif
-
-  typedef struct { char *dptr; int dsize; } datum;
-  typedef void *DBM;
-  extern int dbm_clearerr(DBM *db);
-  extern void dbm_close(DBM *db);
-  extern int dbm_delete(DBM *db, datum key);
-  extern int dbm_error(DBM *db);
-  extern datum dbm_fetch(DBM *db, datum key);
-  extern datum dbm_firstkey(DBM *db);
-  extern datum dbm_nextkey(DBM *db);
-  extern DBM *dbm_open(const char *file, int open_flags, mode_t file_mode);
-  extern int dbm_store(DBM *db, datum key, datum content, int store_mode);
-#endif
-
-};
 
 #include "uc/elog.hpp"
 
@@ -48,37 +21,50 @@ using namespace std;
 /// 実装クラスを隠す
 namespace {
 
-  /// NDBM コンパチライブラリを使って　GDBMを操作するKVS実装クラス
+  /// GDBM ライブラリを使うKVS実装クラス
   class KVS_GDBM_Impl : public uc::KVS, uc::ELog {
-    DBM *db;
+    GDBM_FILE db;
     string db_name;
     int db_mode;
     datum cursor;
+    int block_size;
+    int store_count, fetch_count, delete_count;
 
   public:
-    KVS_GDBM_Impl(const char *dir);
-    ~KVS_GDBM_Impl();
-    void get_kvs_list(std::vector<std::string> &list);
-    void drop_kvs(const char *dbname);
-    int open_kvs(const char *dbname, const char *mode);
-    bool fetch_value(const char *key, std::string &value);
-    bool store_value(const char *key, const char *value);
-    bool has_key(const char *key);
-    void begin_next_key();
-    bool fetch_next_key(std::string &key);
-    void end_next_key();
-    void close_kvs();
-    void sync_kvs();
-    const char *get_kvs_version();
+    KVS_GDBM_Impl();
+    virtual ~KVS_GDBM_Impl();
+    virtual bool set_kvs_directory(const char *dir);
+    virtual void get_kvs_list(std::vector<std::string> &list);
+    virtual void drop_kvs(const char *dbname);
+    virtual int open_kvs(const char *dbname, const char *mode);
+    virtual bool fetch_value(const char *key, std::string &value);
+    virtual bool store_value(const char *key, const char *value);
+    virtual bool has_key(const char *key);
+    virtual void begin_next_key();
+    virtual bool fetch_next_key(std::string &key);
+    virtual void end_next_key();
+    virtual void close_kvs();
+    virtual void sync_kvs();
+    virtual const char *get_kvs_version();
   };
 
-  KVS_GDBM_Impl::KVS_GDBM_Impl(const char *dir) : KVS(dir), db(0), db_mode(0) { 
+  KVS_GDBM_Impl::KVS_GDBM_Impl() : 
+    db(0), db_mode(0), block_size(0), store_count(0), fetch_count(0), delete_count(0)
+  {
     cursor.dptr = 0;
-    init_elog("kvs-bdb");
+    init_elog("kvs-gdbm");
   }
 
   KVS_GDBM_Impl::~KVS_GDBM_Impl() {
+    end_next_key();
     close_kvs();
+  }
+
+  bool KVS_GDBM_Impl::set_kvs_directory(const char *dir) {
+    if (db) return false;
+    if (!dir) dir = "";
+    db_dir_path = dir;
+    return true;
   }
 
   void KVS_GDBM_Impl::get_kvs_list(std::vector<std::string> &list) {
@@ -92,7 +78,7 @@ namespace {
     struct dirent *dir;
 
     while ((dir = readdir(dp)) != NULL ){
-      if (!ends_with(dir->d_name, ".dir")) continue;
+      if (!ends_with(dir->d_name, ".gdbm")) continue;
       string dname(dir->d_name);
       if (dname[0] == '.') continue;
       list.push_back(dname);
@@ -101,12 +87,12 @@ namespace {
     closedir(dp);
   }
 
-  static string dbm_name(const string &dir_path, const char *dbname, const char *suffix = "") {
-    string bdb_path(dir_path);
-    bdb_path += "/";
-    bdb_path += dbname;
-    bdb_path += suffix;
-    return bdb_path;
+  static string dbm_name(const string &dir_path, const char *dbname, const char *suffix = "gdbm") {
+    string db_path(dir_path);
+    if (!db_path.empty()) db_path += "/";
+    db_path += dbname;
+    db_path += suffix;
+    return db_path;
   }
 
   /// データベース・ファイルを破棄する
@@ -114,12 +100,7 @@ namespace {
 
     string dbpath;
 
-    dbpath = dbm_name(db_dir_path, dbname, ".dir");
-    if (!unlink(dbpath.c_str())) {
-      elog("unlink %s:(%d):%s\n", dbpath.c_str(), errno, strerror(errno));
-    }
-
-    dbpath = dbm_name(db_dir_path, dbname, ".pag");
+    dbpath = dbm_name(db_dir_path, dbname);
     if (!unlink(dbpath.c_str())) {
       elog("unlink %s:(%d):%s\n", dbpath.c_str(), errno, strerror(errno));
     }
@@ -128,17 +109,16 @@ namespace {
   /// データベース利用開始
   int KVS_GDBM_Impl::open_kvs(const char *dbname, const char *mode) {
 
-    int flag = O_RDWR;
+    int flag = GDBM_WRITER;
     const char *saved_mode = mode;
 
     while (*mode) {
       switch(*mode) {
       case 'c':
-	flag |= O_CREAT|O_TRUNC;
+	flag = GDBM_NEWDB;
 	break;
       case 'r':
-	flag &= ~O_RDWR;
-	flag |= O_RDONLY;
+	flag = GDBM_READER;
 	break;
       }
       mode++;
@@ -153,9 +133,10 @@ namespace {
     }
 
     string dbm_path = dbm_name(db_dir_path, dbname);
-    DBM *dbm = dbm_open(dbm_path.c_str(), flag, 0777);
+    GDBM_FILE dbm = gdbm_open((char *)dbm_path.c_str(), block_size, flag, 0777, 0);
     if (!dbm) {
-      elog("dbm_open %s ,%s(%#0x):(%d):%s\n", dbm_path.c_str(), saved_mode, flag, errno, strerror(errno));
+      elog("gdbm_open %s ,%s(%#0x):(%d):%s\n", 
+	   dbm_path.c_str(), saved_mode, flag, gdbm_errno, gdbm_strerror(gdbm_errno));
       return 0;
     }
 
@@ -163,13 +144,17 @@ namespace {
 
     if (db) {
       // 前の接続がある場合は自動で閉じる
-      dbm_close(db);
-      elog(I, "%s force closed.\n", db_name.c_str());
+      gdbm_close(db);
+
+      elog(I, "%s force closed. fetch:%d, store:%d, delete:%d\n",
+	   db_name.c_str(), fetch_count, store_count, delete_count);
     }
 
     db = dbm;
     db_name = dbname;
     db_mode = flag;
+    store_count = fetch_count = delete_count = 0;
+
     return 1;
   }
   
@@ -181,7 +166,8 @@ namespace {
     dkey.dptr = (char *)key;
     dkey.dsize = strlen(key);
 
-    datum dvalue = dbm_fetch(db, dkey);
+    datum dvalue = gdbm_fetch(db, dkey);
+    fetch_count++;
     if (dvalue.dptr == 0) {
       // 値が取れなければ空文字を返す
       value = "";
@@ -201,17 +187,19 @@ namespace {
 
     if (!value || !*value) {
       // 値が空であればエントリを削除する
-      int rc = dbm_delete(db, dkey);
+      int rc = gdbm_delete(db, dkey);
       if (rc != 0)
-	elog(W, "dbm_del %s,%s:(%d)\n", db_name.c_str(), key, dbm_error(db));
+	elog(W, "gdbm_delete %s,%s:(%d):%s\n", db_name.c_str(), key, gdbm_errno, gdbm_strerror(gdbm_errno));
+      delete_count++;
       return rc == 0;
     }
     dvalue.dptr = (char *)value;
     dvalue.dsize = strlen(value);
+    store_count++;
     
-    int rc = dbm_store(db,dkey,dvalue, DBM_REPLACE);
+    int rc = gdbm_store(db, dkey, dvalue, GDBM_REPLACE);
     if (rc)
-      elog(W, "dbm_store %s,%s:(%d)\n", db_name.c_str(), key, dbm_error(db));
+      elog(W, "gdbm_store %s,%s:(%d):%s\n", db_name.c_str(), key, gdbm_errno, gdbm_strerror(gdbm_errno));
     return rc == 0;
   }
 
@@ -221,8 +209,8 @@ namespace {
     datum dkey;
     dkey.dptr = (char *)key;
     dkey.dsize = strlen(key);
-    datum dvalue = dbm_fetch(db, dkey);
-    return dvalue.dptr != 0;
+    int rc = gdbm_exists(db, dkey);
+    return rc != 0;
   }
   
   /// 登録キー名の入手開始
@@ -232,7 +220,7 @@ namespace {
       return;
     }
 
-    cursor = dbm_firstkey(db);
+    cursor = gdbm_firstkey(db);
     elog(D, "cursor for %s created.\n", db_name.c_str());
   }
   
@@ -241,13 +229,16 @@ namespace {
     if (!cursor.dptr) { key = ""; return false; }
 
     key.assign((char *)cursor.dptr, cursor.dsize);
-    cursor = dbm_nextkey(db);
+    datum next_key = gdbm_nextkey(db, cursor);
+    free(cursor.dptr);
+    cursor = next_key;
 
-    return true;
+    return cursor.dptr != 0;
   }
   
   /// キーの入手の終了
   void KVS_GDBM_Impl::end_next_key() {
+    free(cursor.dptr);
     cursor.dptr = 0;
   }
 
@@ -255,8 +246,10 @@ namespace {
   void KVS_GDBM_Impl::close_kvs() {
     if (!db) return;
 
-    dbm_close(db);
-    elog(D, "%s closed.\n", db_name.c_str());
+    gdbm_close(db);
+
+    elog(D, "%s closed. fetch:%d, store:%d, delete:%d\n",
+	 db_name.c_str(), fetch_count, store_count, delete_count);
 
     db = 0;
     db_name = "";
@@ -267,35 +260,18 @@ namespace {
   void KVS_GDBM_Impl::sync_kvs() {
     if (!db) return;
 
-    // 同期をとるAPIが無いので、閉じて開き直す
-    dbm_close(db);
-
-    string dbm_path = dbm_name(db_dir_path, db_name.c_str());
-    DBM *dbm = dbm_open(dbm_path.c_str(), db_mode, 0777);
-    if (!dbm) {
-      elog("dbm_open %s ,(%#0x):(%d):%s\n", dbm_path.c_str(), db_mode, errno, strerror(errno));
-      db = 0;
-    }
-    db = dbm;
-
-    elog(D, "%s ,(%#0x) reopened.\n", dbm_path.c_str(), db_mode);
+    gdbm_sync(db);
+    /*
+      メインメモリの状態をディスクの状態と同期させるまでは戻って来ない
+     */
+    elog(D, "%s ,(%#0x) sync called.\n", db_name.c_str());
   }
 
   const char *KVS_GDBM_Impl::get_kvs_version() {
-    return "NDBM: 1.0";
+    return gdbm_version;
   }
 
 };
 
-namespace uc {
-  KVS::KVS(const char *dir) : db_dir_path(dir) { }
-
-  void KVS::show_report(FILE *fout) {
-    fprintf(fout,"kvs: %s\n", get_kvs_version());
-  }
-
-  KVS *KVS::get_kvs_instance(const char *dir_path, const char *kvs_type) {
-    return new KVS_GDBM_Impl(dir_path);
-  }
-};
+extern uc::KVS *create_KVS_GDBM_Impl() { return new KVS_GDBM_Impl(); }
 

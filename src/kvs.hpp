@@ -14,14 +14,20 @@ namespace uc {
   /// Key-Value Store の基本機能を利用するインタフェース
   class KVS {
   protected:
-    KVS(const char *dir);
     std::string db_dir_path;
+    KVS() { }
+
+  private:
+    KVS(KVS &not_allow) { }
+    KVS &operator=(KVS &not_allow) { }
 
   public:
     /// 操作用インスタンスの入手
     static KVS *get_kvs_instance(const char *dir_path, const char *dba_type = "");
-    virtual ~KVS() {}
+    virtual ~KVS();
 
+    /// 基準ディレクトリの設定
+    virtual bool set_kvs_directory(const char *dir) = 0;
     /// 基準ディレクトリの入手
     virtual std::string &get_kvs_directory() { return db_dir_path; }
 
