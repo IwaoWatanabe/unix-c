@@ -6,6 +6,8 @@
 #include "uc/elog.hpp"
 #include <vector>
 
+struct stat;
+
 namespace {
 
   /// オペレーションの確認用
@@ -15,6 +17,9 @@ namespace {
   class Local_File_Nop: public uc::Local_File, uc::ELog {
   public:
     virtual ~Local_File_Nop() { }
+    bool begin_scan_dir(const char *dir_name, bool skip_hidden_file = true);
+    char *next_entry(struct stat *sbuf = 0, bool follow_link = false);
+    void end_scan_dir();
     bool isdir(const char *dirpath);
     bool mkdirs(const char *dirpath);
     int rmdirs(const char *dirpath);
@@ -37,17 +42,25 @@ namespace {
     int copy_file_or_directory(const char *dst, const char *src, bool recurce);
     int move_regular_file(const char *dst, const char *src);
 
+    char *dir_last_entry;
+    size_t dir_entry_len;
+    void *dir;
+    bool skip_hidden;
+    int scan_counter;
+    std::string dir_scan_path;
+
   public:
     /// 基準ディレクトリを指定しないで初期化する
     /*
       相対パスは通常のワークディレクトリとして処理する
      */
     Local_File_Impl();
-
     /// 相対パスを渡して処理するときの、基準ディレクトリを指定して初期化する
     Local_File_Impl(const char *base_dir);
     virtual ~Local_File_Impl();
-
+    bool begin_scan_dir(const char *dir_name, bool skip_hidden_file = true);
+    char *next_entry(struct stat *sbuf = 0, bool follow_link = false);
+    void end_scan_dir();
     bool isdir(const char *dirpath);
     std::string getcwd();
     bool chdir(const char *dirpath);
@@ -115,11 +128,132 @@ namespace uc {
 
 namespace {
 
-  Local_File_Impl::Local_File_Impl() {
+  static int max_file_name_len = 256;
+
+  Local_File_Impl::Local_File_Impl() :
+    dir_last_entry(0), dir_entry_len(0), dir(0), 
+    skip_hidden(true), scan_counter(0)
+  {
     init_elog("fm");
   }
 
-  Local_File_Impl::~Local_File_Impl() { }
+  Local_File_Impl::~Local_File_Impl() {
+    end_scan_dir();
+    free(dir_last_entry);
+  }
+
+  /// ディレクトリ・スキャンの開始
+  bool Local_File_Impl::begin_scan_dir(const char *dir_name, bool skip_hidden_file) {
+
+    end_scan_dir();
+    /*
+      以前のスキャンがあれば強制的に中断する
+    */
+
+    if (!dir_name || !*dir_name) dir_name = ".";
+    /*
+      空文字を渡されたときは カレントディレクトリを利用する。
+    */
+
+    DIR *tdir = opendir(dir_name);
+    if (tdir == NULL) {
+      elog("opendir %s:(%d):%s\n", dir_name, errno, strerror(errno));
+      return false;
+    }
+    dir = tdir;
+    skip_hidden = skip_hidden_file;
+
+    // ここからエントリの読み込み領域の準備
+
+    size_t dlen = strlen(dir_name);
+    char *dbuf;
+
+    size_t len = dlen + max_file_name_len + 2;
+    if (dir_entry_len < len) {
+      dbuf = (char *)realloc(dir_last_entry, len);
+      if (!dbuf) {
+	elog(W, "realloc ,%u:(%d):%s\n", len, errno, strerror(errno));
+	end_scan_dir(); 
+	return false;
+      }
+      dir_last_entry = dbuf;
+      dir_entry_len = len;
+    }
+
+    dbuf = strcpy(dir_last_entry, dir_name);
+    if (dbuf[dlen -1] != '/') strcat(dbuf, "/");
+    /*
+      末尾は / がついた状態とする
+     */
+
+    dir_scan_path = dbuf;
+    scan_counter = 0;
+    elog(T, "begin_scan_dir: %s\n", dir_name);
+    return true;
+  }
+
+  /// ディレクトリ・エントリの入手(親と自身は含まれない)
+  /*
+    ディレクトリ・エントリを入手する。
+    このメソッド呼び出しの前に begin_scan_dir を呼び出しておく必要がある。
+    入手するエントリがないか、何らかの問題が生じたら NULL が返る。
+    処理を中断する場合は end_scan_dir を呼べば
+   */
+  char *Local_File_Impl::next_entry(struct stat *sbuf, bool follow_link) {
+    DIR *tdir = (DIR *)dir;
+    if (!tdir) return 0;
+
+    struct dirent *ent;
+    
+    while ((ent = readdir(tdir)) != NULL) {
+      if (ent->d_name[0] == '.') {
+	if (skip_hidden) continue;
+	// 自身は対象から除外する
+	if (ent->d_name[1] == 0) continue;
+	// 親ディレクトリは対象から除外する
+	if (ent->d_name[1] == '.' && ent->d_name[2] == 0) continue;
+      }
+      break;
+    }
+
+    if (!ent) { end_scan_dir(); return 0; }
+
+    scan_counter++;
+
+    if (!sbuf)
+      return strcpy(dir_last_entry, ent->d_name);
+
+    char *tbuf = strcpy(dir_last_entry, dir_scan_path.c_str());
+
+    strcpy(tbuf + dir_scan_path.size(), ent->d_name);
+
+    if (follow_link) {
+      if (lstat(tbuf, sbuf) != 0) {
+	elog("lstat %s:(%d):%s\n", tbuf, errno, strerror(errno));
+	end_scan_dir();
+	return 0;
+      }
+      return tbuf + dir_scan_path.size();
+    }
+
+    if (stat(tbuf, sbuf) != 0) {
+      elog("stat %s:(%d):%s\n", tbuf, errno, strerror(errno));
+      end_scan_dir();
+      return 0;
+    }
+    return tbuf + dir_scan_path.size();
+  }
+
+  /// ディレクトリ・スキャンの終了
+  void Local_File_Impl::end_scan_dir() {
+    DIR *tdir = (DIR *)dir;
+    if (!tdir) return;
+    if (closedir(tdir) != 0)
+      elog("closedir %.*s:(%d):%s\n", dir_scan_path.size() - 1, dir_scan_path.c_str(), errno, strerror(errno));
+
+    elog(T, "end_scan_dir: %.*s: scan-entry:%d\n", dir_scan_path.size() - 1, dir_scan_path.c_str(), scan_counter);
+    dir = 0;
+  }
 
   /// パスの最後の構成要素を返す
   string Local_File_Impl::basename(const char *path) {
@@ -297,8 +431,6 @@ namespace {
     }
     return 0;
   }
-
-  static int max_file_name_len = 256;
 
   /// ファイルを削除する
   /*
@@ -752,6 +884,10 @@ namespace uc {
     return new Local_File_Impl();
   }
 
+  Local_File *Local_File::create_Local_File_instance(const char *type) {
+    return create_Local_File();
+  }
+  
   /// ディレクトリ名入手のテスト
   static int cmd_basename(int argc,char **argv) {
     if (argc <= 1) {
@@ -904,6 +1040,30 @@ namespace uc {
     return 1;
   }
 
+  /// ファイルの一覧のテスト
+  // まだ単純な実装
+  static int cmd_ls(int argc,char **argv) {
+    int opt;
+    bool verbose = false;
+
+    while ((opt = getopt(argc,argv,"v")) != -1) {
+      switch(opt) { case 'v': verbose = true; }
+    }
+
+    auto_ptr<Local_File> fm(create_Local_File());
+
+    char *dir = "";
+
+    if (fm->begin_scan_dir(dir, false)) {
+      char *ent;
+      while ((ent = fm->next_entry())) {
+	puts(ent);
+      }
+      fm->end_scan_dir();
+    }
+    return 0;
+  }
+
 };
 
 
@@ -921,6 +1081,7 @@ subcmd fileop_cmap[] = {
   { "rm", uc::cmd_remove_file, },
   { "cp", uc::cmd_copy_file, },
   { "mv", uc::cmd_move_file, },
+  { "ls", uc::cmd_ls, },
   { 0 },
 };
 

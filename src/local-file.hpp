@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <string>
 
+struct stat;
 namespace uc {
 
   /// ローカル・ファイルの基本操作をサポートする
@@ -17,6 +18,12 @@ namespace uc {
   public:
     Local_File() { }
     virtual ~Local_File();
+    /// ディレクトリ・スキャンの開始
+    virtual bool begin_scan_dir(const char *dir_name, bool skip_hidden_file = true) = 0;
+    /// ディレクトリ・エントリの入手(親と自身は含まれない)
+    virtual char *next_entry(struct stat *sbuf = 0, bool follow_link = false) = 0;
+    /// ディレクトリ・スキャンの終了
+    virtual void end_scan_dir() = 0;
     /// ディレクトリであるか診断する
     virtual bool isdir(const char *dirpath) = 0;
     /// 作業ディレクトリ名を入手する
@@ -41,6 +48,8 @@ namespace uc {
 
     /// テキスト・ファイルを読み込むインスタンスを入手する
     virtual Local_Text_Source *create_Text_Source(const char *file_name);
+
+    static Local_File *create_Local_File_instance(const char *type = "");
   };
 };
 

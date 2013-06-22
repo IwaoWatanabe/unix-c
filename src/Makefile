@@ -32,6 +32,11 @@ LDFLAGS += -lqdbm
 LDFLAGS += -lgdbm
 LDFLAGS += -lmecab -lsenna
 
+ifdef USE_DB_DBM
+CXXFLAGS += -DDB_DBM_HSEARCH=1
+endif
+
+
 LIBXML_CFLAGS = 
 CXXFLAGS += `xml2-config --cflags`
 LDFLAGS += `xml2-config --libs`
@@ -73,7 +78,7 @@ APP04_OBJS += file-op.o
 APP04_OBJS += lineread.o
 APP04_OBJS += index.o
 APP04_OBJS += xml.o
-APP04_OBJS += kvs-gdbm.o
+APP04_OBJS += kvs-ndbm.o kvs-gdbm.o
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF
