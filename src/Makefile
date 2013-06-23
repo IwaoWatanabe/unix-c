@@ -37,9 +37,11 @@ CXXFLAGS += -DDB_DBM_HSEARCH=1
 endif
 
 
-LIBXML_CFLAGS = 
 CXXFLAGS += `xml2-config --cflags`
 LDFLAGS += `xml2-config --libs`
+
+CXXFLAGS += `mysql_config --cflags`
+LDFLAGS += `mysql_config --libs_r`
 
 VERSION=0.1
 RPMBASE=~/rpm/SOURCES
@@ -79,6 +81,7 @@ APP04_OBJS += lineread.o
 APP04_OBJS += index.o
 APP04_OBJS += xml.o
 APP04_OBJS += kvs-util.o kvs-ndbm.o kvs-gdbm.o kvs-bdb.o kvs-qdbm.o
+APP04_OBJS += mysql-driver.o
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF
