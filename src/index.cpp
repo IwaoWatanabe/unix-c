@@ -16,18 +16,18 @@ namespace uc {
     std::map<std::string,std::string> includes, excludes;
   };
 
-  /// インデックスの検索結果の入手
-  class Index_Result_Documents {
+  /// インデックスの検索結果の入手に利用する
+  class Index_Documents {
   public:
     /// 次の対象ドキュメントのドキュメントIDの入手
     virtual bool fetch_next_document(std::string doc_id) = 0;
     virtual int get_fetch_count();
 
-    Index_Result_Documents() {}
-    virtual ~Index_Result_Documents() {}
+    Index_Documents() {}
+    virtual ~Index_Documents() {}
   };
 
-  /// インデックスの基本情報の入手
+  /// インデックスの基本情報を入手する
   /*
     特定のディレクトリを対象とるす
     インデックスの更新管理を担当する。
@@ -64,13 +64,13 @@ namespace uc {
     virtual void update_index(std::string doc_id) = 0;
 
     /// インデックスに対して検索処理を行う
-    virtual Index_Result_Documents *query(Index_Condition &condition) = 0;
+    virtual Index_Documents *query(Index_Condition &condition) = 0;
     /// インデックスに対して検索処理をする(件数確認のみ)
     virtual long count_query(Index_Condition &condition) = 0;
 
   };
 
-  /// 全文検索の基本機能を利用するインタフェース
+  /// 全文検索の基本機能を利用する
   /*
     ファイルシステム上のインデックスの配置領域と、
     インデックス化するドキュメント群の対応に名前を付けて管理する。
@@ -117,7 +117,7 @@ namespace uc {
     */
     virtual void get_section_list(const char *name, std::vector<std::string> &list) = 0;
     /// インデックスに対して検索処理を行う
-    virtual Index_Result_Documents *query(const char *name, Index_Condition &condition) = 0;
+    virtual Index_Documents *query(const char *name, Index_Condition &condition) = 0;
     /// インデックスに対して検索処理をする(件数確認のみ)
     virtual long count_query(const char *name, Index_Condition &condition) = 0;
     /// ドキュメントIDに対応するセクション情報を入手
@@ -158,25 +158,29 @@ namespace {
   class Index_Manager_Impl;
   class Senna_Index_Scanner;
 
-  enum ELog_Level { I = uc::ELog::I, W = uc::ELog::W, };
+  // enum ELog_Level { I = uc::ELog::I, W = uc::ELog::W, };
 
   /// sennaインデックス・インスタンスと連動する Senna_Index_Scanner の従属クラス
   /*
     senna APIを直接的に呼び出す。
+    論理的に同じドキュメントをインデックスで管理する。
     この実装は一つのsennaインデックスを操作するだけだが、
-    従属情報も合わせて制御するサブクラスが作成されるかもしれない。
+    拡張して従属情報も合わせて制御するサブクラスが作成されるかもしれない。
   */
 
-  class Senna_Index {
+  class Senna_Index : uc::ELog {
   protected:
     sen_index *index;
     string index_path;
-    uc::ELog *logger;
     Senna_Index_Scanner *scanner;
 
   public:
-    Senna_Index(Senna_Index_Scanner *sis, uc::ELog *elog) :
-      scanner(sis),logger(elog) { }
+    Senna_Index(Senna_Index_Scanner *sis)
+      : scanner(sis)
+    {
+      init_elog("Senna_Index");
+    }
+
     virtual ~Senna_Index() { close_index(); }
 
     /// Sennaライブラリの利用を開始する
@@ -293,7 +297,7 @@ namespace {
 
     sen_rc rc = sen_index_close(index);
     if (rc != sen_success)
-      logger->elog(W, "sen_sym_close failur: %s\n",get_error_text(rc));
+      elog(W, "sen_sym_close failur: %s\n",get_error_text(rc));
   }
 
   /// インデックスの利用を開始する
@@ -308,7 +312,7 @@ namespace {
       if (index) {
 	close_index();
       }
-      logger->elog(I, "index %s opened\n",index_path);
+      elog(I, "index %s opened\n",index_path);
       this->index = idx;
       this->index_path = index_path;
       return true;
@@ -321,7 +325,7 @@ namespace {
 
     idx = sen_index_create(index_path, key_size, flags, initial_n_segments, enc);
     if (!idx) {
-      logger->elog("index %s create failur\n",index_path);
+      elog("index %s create failur\n",index_path);
       return false;
     }
     this->index = idx;
@@ -342,7 +346,7 @@ namespace {
       if (index) {
 	close_index();
       }
-      logger->elog(I, "index %s opened\n",index_path);
+      elog(I, "index %s opened\n",index_path);
       this->index = idx;
       this->index_path = index_path;
       return true;
@@ -355,7 +359,7 @@ namespace {
 
     idx = sen_index_create_with_keys(index_path, sym, flags, initial_n_segments, enc);
     if (!idx) {
-      logger->elog("index %s create failur\n",index_path);
+      elog("index %s create failur\n",index_path);
       return false;
     }
     this->index = idx;
@@ -372,7 +376,7 @@ namespace {
   bool Senna_Index::update_index(const char *doc_key, const char *newvalue, size_t newvalue_len,
 				 const char *oldvalue = 0, size_t oldvalue_len = 0) {
     if (!index) {
-      logger->elog("index not opend.\n");
+      elog("index not opend.\n");
       return false;
     }
 
@@ -383,7 +387,7 @@ namespace {
 		    newvalue, newvalue_len);
 
     if (rc == sen_success) return true;
-    logger->elog(W, "update failur: %s\n", get_error_text(rc));
+    elog(W, "update failur: %s\n", get_error_text(rc));
   }
 
 
@@ -391,9 +395,9 @@ namespace {
   void Senna_Index::remove_index(const char *index_path) {
     sen_rc rc = sen_index_remove(index_path);
     if (rc == sen_success)
-      logger->elog(I, "index removed: %s\n",index_path);
+      elog(I, "index removed: %s\n",index_path);
     else
-      logger->elog(W, "index remove failed: %s\n",index_path);
+      elog(W, "index remove failed: %s\n",index_path);
   }
 
   /// インデックスの基本情報を出力する
@@ -414,7 +418,7 @@ namespace {
 		     &inv_seg_size, &inv_chunk_size);
 
     if (rc != sen_success) {
-      logger->elog(W, "WARNING: sen_index_info failur: %s", get_error_text(rc));
+      elog(W, "sen_index_info failur: %s", get_error_text(rc));
       return;
     }
 
@@ -446,7 +450,7 @@ namespace {
       sen_encoding enc = sen_enc_utf8;
       sym = sen_sym_create(sym_path, key_size, flags, enc);
 
-      if (!sym) logger->elog("symbol open/create failur: %s", sym_path);
+      if (!sym) elog("symbol open/create failur: %s", sym_path);
     }
     return sym;
   }
@@ -456,7 +460,7 @@ namespace {
     if (sym) return;
     sen_rc rc = sen_sym_close(sym);
     if (rc == sen_success) return;
-    logger->elog("symbol close failur: %s", get_error_text(rc));
+    elog("symbol close failur: %s", get_error_text(rc));
   }
 
   void Senna_Index::show_symbol_info(sen_sym *sym, FILE *fout) {
@@ -468,7 +472,7 @@ namespace {
     // シンボル・ファイルの基本情報を入手
     sen_rc rc = sen_sym_info(sym, &key_size, &flags, &encoding, &nrecords, &file_size);
     if (rc != sen_success) {
-      logger->elog(W, "WARNING: sen_sym_info failur: %s", get_error_text(rc));
+      elog(W, "sen_sym_info failur: %s", get_error_text(rc));
       return;
     }
 
@@ -557,7 +561,7 @@ namespace {
     virtual void update_index(string doc_id);
 
     /// インデックスに対して検索処理を行う
-    virtual uc::Index_Result_Documents *query(uc::Index_Condition &condition);
+    virtual uc::Index_Documents *query(uc::Index_Condition &condition);
     /// インデックスに対して検索処理をする(件数確認のみ)
     virtual long count_query(uc::Index_Condition &condition);
   };
@@ -587,7 +591,7 @@ namespace {
     */
     virtual void get_section_list(const char *name, vector<string> &list);
     /// インデックスに対して検索処理を行う
-    virtual uc::Index_Result_Documents *query(const char *name, uc::Index_Condition &condition);
+    virtual uc::Index_Documents *query(const char *name, uc::Index_Condition &condition);
     /// インデックスに対して検索処理をする(件数確認のみ)
     virtual long count_query(const char *name, uc::Index_Condition &condition);
     /// ドキュメントIDに対応するセクション情報を入手
@@ -644,7 +648,7 @@ namespace {
   }
 
   /// インデックスに対して検索処理を行う
-  uc::Index_Result_Documents *Senna_Index_Scanner::query(uc::Index_Condition &condition) {
+  uc::Index_Documents *Senna_Index_Scanner::query(uc::Index_Condition &condition) {
     return 0;
   }
 
@@ -694,7 +698,7 @@ namespace {
   }
 
   /// インデックスに対して検索処理を行う
-  uc::Index_Result_Documents *Index_Manager_Impl::query(const char *name, uc::Index_Condition &condition) {
+  uc::Index_Documents *Index_Manager_Impl::query(const char *name, uc::Index_Condition &condition) {
     return 0;
   }
 

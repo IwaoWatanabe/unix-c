@@ -18,6 +18,10 @@
 
 namespace uc {
 
+  /// 設定情報を入手するインタフェース
+  /*
+    実装クラスは処理系が提供する。
+   */
   class Property {
   public:
     virtual ~Property() = 0;
@@ -49,16 +53,19 @@ namespace uc {
     virtual const char *get_service_version() = 0;
   };
   
-  /// サービスをインスタンスかするクラスが実装するインタフェース
+  /// サービスをインスタンス化するクラスが実装するインタフェース
+  /*
+    コンテナは、このインタフェースを利用してサービスを生成する。
+   */
   class Service_Factory {
   public:
     virtual ~Service_Factory() = 0;
     /// サービスの処理インスタンスを作成する
-    virtual Service *create_Service_instance(const char *name_hint);
+    virtual Service *create_Service_instance(const char *name_hint) = 0;
     /// サービス・ファクトリの名称を入手する
     virtual const char *get_factory_name() = 0;
     /// コンテナは、このメソッドを使って設定パラメータを渡す
-    virtual void set_Property(Property *props);
+    virtual void set_Property(Property *props) = 0;
   };
 
   class Job_Context;
