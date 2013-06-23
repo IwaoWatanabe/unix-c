@@ -16,7 +16,7 @@ namespace uc {
   /**
      行の読み取りバッファの制御はこのクラスが制御する。
   */
-  class Text_Source {
+  class Text_Source : virtual ELog {
   protected:
     /// 読み込みバッファ
     union {
@@ -26,7 +26,6 @@ namespace uc {
     } buf;
     /// バッファサイズ(文字数)
     size_t buf_len;
-    ELog *logger;
 
   private:
     /// 読み込みストリーム
@@ -42,7 +41,7 @@ namespace uc {
 
     int get_counter() { return counter; }
     int countup() { return counter++; }
-    Text_Source() : buf_len(0), fp(0), logger(0), counter(0) { buf.ptr = 0; }
+    Text_Source() : buf_len(0), fp(0), counter(0) { buf.ptr = 0; }
 
   public:
     /// 文字セット操作の現在のlocale設定を入手
@@ -91,7 +90,7 @@ namespace uc {
   };
 
   /// ファイル・システムのテキストを読み込む
-  class Local_Text_Source : public Text_Source, ELog {
+  class Local_Text_Source : public Text_Source, virtual ELog {
     std::string file_name, encoding;
 
     virtual const char *get_source_name() { return file_name.c_str(); }
@@ -114,7 +113,7 @@ namespace uc {
   };
 
   /// コマンドを動かして、その出力をテキストとして読み込む
-  class Command_Text_Source : public Text_Source, ELog {
+  class Command_Text_Source : public Text_Source, virtual ELog {
     std::string command_line, encoding;
 
     virtual const char *get_source_name() { return command_line.c_str(); }

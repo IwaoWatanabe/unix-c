@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <libgen.h>
+#include <unistd.h>
 
 using namespace std;
 
@@ -206,19 +207,63 @@ namespace {
   }
 };
 
+extern "C" {
+
+  /// 現在動作しているプロセスの名称を得る
+  static const char *get_process_name() {
+    static const char *cmd;
+    if (cmd) return cmd;
+
+    cmd = getenv("COMMAND");
+    if (cmd) return cmd;
+
+    char pbuf[80];
+    snprintf(pbuf,sizeof pbuf,"/proc/%d/cmdline", getpid());
+    
+    FILE *fp;
+    if ((fp = fopen(pbuf,"r")) == NULL) {
+      fprintf(stderr,"ERROR: fopen %s:(%d):%s\n",
+	      pbuf, errno, strerror(errno));
+      return cmd = "noname";
+    }
+
+    if (!fgets(pbuf, sizeof pbuf, fp))
+      cmd = "noname";
+    else {
+      string xcmd = ::basename(pbuf);
+      cmd = strdup(xcmd.c_str());
+    }
+
+    if (fclose(fp) != 0) {
+      fprintf(stderr,"WARNING: fclose:(%d):%s\n", 
+	      errno, strerror(errno));
+    }
+    return cmd;
+  }
+
+};
+
 namespace uc {
 
-  ELog::ELog() : mgr(0) { }
+  ELog::ELog() : mgr(0), ident("") { }
   ELog::~ELog() { if (mgr) ((ELog_Manager *)mgr)->reopen(); }
+
+  static ELog_Manager *default_elog_manager;
 
   void
   ELog::init_elog(const char *ident) {
-    if (mgr) return;
-    const char *work_dir = getenv("WORKDIR");
-    if (!work_dir) work_dir = "work";
-    mgr = new ELog_Manager(ident, work_dir);
+    this->ident = ident;
 
-    elog(T, "elog initializing: %s: %s\n", ident, work_dir);
+    if (!default_elog_manager) {
+      const char *work_dir = getenv("WORKDIR");
+      if (!work_dir) work_dir = "work";
+
+      const char *pname = get_process_name();
+      default_elog_manager = new ELog_Manager(pname, work_dir);
+    }
+
+    mgr = default_elog_manager;
+    elog(T, "elog initializing: %s\n", ident);
   }
   
   int

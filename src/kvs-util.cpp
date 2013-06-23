@@ -64,12 +64,17 @@ namespace uc {
 namespace {
 
   /// KVSの基本機能を確認するツール
-  class KVS_tool {
+  class KVS_tool : uc::ELog {
     uc::Local_Text_Source *ts;
 
   public:
     KVS_tool(const char *path, const char *type) :
-      db(uc::KVS::get_kvs_instance(path, type)), ts(create_Local_Text_Source()) { }
+      db(uc::KVS::get_kvs_instance(path, type)),
+      ts(create_Local_Text_Source())
+    {
+      init_elog("KVS_tool");
+    }
+
     ~KVS_tool() { delete db; delete ts; }
 
     uc::KVS *db;

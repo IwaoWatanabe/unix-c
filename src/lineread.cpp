@@ -56,15 +56,13 @@ namespace uc {
 
 	char *nbuf = (char *)realloc(buf.c, buf_len);
 	if (!nbuf) {
-	  if (logger)
-	    logger->elog("realloc ,%u:(%d):%s\n", buf_len, errno, strerror(errno));
+	  elog(T,"realloc ,%u:(%d):%s\n", buf_len, errno, strerror(errno));
 
 	  if (len) *len = pdiff ? tbuf - buf.c : 0;
 	  return pdiff ? buf.c : NULL;
 	}
 
-	if (logger)
-	  logger->elog(ELog::T, "realloc ,%u\n", buf_len);
+	elog(T, "realloc ,%u\n", buf_len);
 
 	tbuf = nbuf + pdiff;
 	buf.c = nbuf;
@@ -89,10 +87,8 @@ namespace uc {
     if (!fp) return counter;
 
     if (0 != fclose(fp)) {
-      if (logger) {
-	const char *last_source = get_source_name();
-	logger->elog(ELog::W, "fclose %s:(%d):%\n",last_source,errno,strerror(errno));
-      }
+      const char *last_source = get_source_name();
+      elog(W, "fclose %s:(%d):%\n",last_source,errno,strerror(errno));
     }
     fp = NULL;
     return counter;
@@ -117,8 +113,7 @@ namespace uc {
   }
 
   Local_Text_Source::Local_Text_Source() {
-    logger = this;
-    init_elog("text-source");
+    init_elog("Local_Text_Source");
   }
 
   Local_Text_Source::~Local_Text_Source() {
@@ -175,10 +170,8 @@ namespace uc {
       /*
 	標準入力を対象としている場合は閉じる処理をしない。
        */
-      if (logger) {
-	const char *last_source = get_source_name();
-	logger->elog(ELog::W, "fclose %s:(%d):%\n", last_source, errno, strerror(errno));
-      }
+      const char *last_source = get_source_name();
+      elog(W, "fclose %s:(%d):%\n", last_source, errno, strerror(errno));
     }
     set_stream(NULL);
     return get_counter();
@@ -191,7 +184,10 @@ namespace uc {
 namespace uc {
 
   /// コマンドを動かして、その出力をテキストとして読み込む
-  Command_Text_Source::Command_Text_Source() { }
+  Command_Text_Source::Command_Text_Source() {
+    init_elog("Command_Text_Source");
+  }
+
   Command_Text_Source::~Command_Text_Source() { }
 
   /// コマンドを呼び出し、読み込みを開始する
@@ -232,10 +228,8 @@ namespace uc {
     if (!fp) return get_counter();
 
     if (0 != pclose(fp)) {
-      if (logger) {
-	const char *last_source = get_source_name();
-	logger->elog(ELog::W, "pclose %s:(%d):%\n", last_source, errno, strerror(errno));
-      }
+      const char *last_source = get_source_name();
+      elog(W, "pclose %s:(%d):%\n", last_source, errno, strerror(errno));
     }
     set_stream(NULL);
     return get_counter();

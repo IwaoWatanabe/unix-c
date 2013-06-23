@@ -31,6 +31,7 @@ namespace uc {
   /// ログを出力するクラス
   class ELog {
     void *mgr;
+    const char *ident;
   public:
     /// ログレベル
     enum Level { F, E, W, N, I, A, D, T };
