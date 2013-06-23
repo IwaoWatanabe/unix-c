@@ -178,6 +178,9 @@ int main(int argc, char **argv) {
   extern subcmd xml_cmap[];
   subcmd_add(xml_cmap);
 
+  extern subcmd kvs_cmap[];
+  subcmd_add(kvs_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }

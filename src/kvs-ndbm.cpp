@@ -61,20 +61,20 @@ namespace {
 
   public:
     KVS_NDBM_Impl();
-    ~KVS_NDBM_Impl();
-    bool set_kvs_directory(const char *dir);
-    void get_kvs_list(std::vector<std::string> &list);
-    void drop_kvs(const char *dbname);
-    int open_kvs(const char *dbname, const char *mode);
-    bool fetch_value(const char *key, std::string &value);
-    bool store_value(const char *key, const char *value);
-    bool has_key(const char *key);
-    void begin_next_key();
-    bool fetch_next_key(std::string &key);
-    void end_next_key();
-    void close_kvs();
-    void sync_kvs();
-    const char *get_kvs_version();
+    virtual ~KVS_NDBM_Impl();
+    virtual bool set_kvs_directory(const char *dir);
+    virtual void get_kvs_list(std::vector<std::string> &list);
+    virtual void drop_kvs(const char *dbname);
+    virtual int open_kvs(const char *dbname, const char *mode);
+    virtual bool fetch_value(const char *key, std::string &value);
+    virtual bool store_value(const char *key, const char *value);
+    virtual bool has_key(const char *key);
+    virtual void begin_next_key();
+    virtual bool fetch_next_key(std::string &key);
+    virtual void end_next_key();
+    virtual void close_kvs();
+    virtual void sync_kvs();
+    virtual const char *get_kvs_version();
   };
 
   KVS_NDBM_Impl::KVS_NDBM_Impl() : db(0), db_mode(0)
@@ -304,29 +304,4 @@ namespace {
 };
 
 extern uc::KVS *create_KVS_NDBM_Impl() { return new KVS_NDBM_Impl(); }
-
-extern uc::KVS *create_KVS_GDBM_Impl();
-
-namespace uc {
-
-  KVS::~KVS() { }
-
-  void KVS::show_report(FILE *fout) {
-    fprintf(fout,"kvs: %s\n", get_kvs_version());
-  }
-  KVS *KVS::get_kvs_instance(const char *dir_path, const char *kvs_type) {
-    KVS *kvs;
-
-    if (strcasecmp(kvs_type, "ndbm"))
-      kvs = create_KVS_NDBM_Impl();
-    else if (strcasecmp(kvs_type, "gdbm"))
-      kvs = create_KVS_GDBM_Impl();
-    else
-      kvs = create_KVS_GDBM_Impl();
-    
-    kvs->set_kvs_directory(dir_path);
-
-    return kvs;
-  }
-};
 

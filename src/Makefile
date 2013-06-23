@@ -28,8 +28,8 @@ LDFLAGS += -lreadline -lhistory
 endif
 LDFLAGS += -lncursesw
 LDFLAGS += -ldb
-LDFLAGS += -lqdbm
 LDFLAGS += -lgdbm
+LDFLAGS += -lqdbm
 LDFLAGS += -lmecab -lsenna
 
 ifdef USE_DB_DBM
@@ -78,7 +78,7 @@ APP04_OBJS += file-op.o
 APP04_OBJS += lineread.o
 APP04_OBJS += index.o
 APP04_OBJS += xml.o
-APP04_OBJS += kvs-ndbm.o kvs-gdbm.o
+APP04_OBJS += kvs-util.o kvs-ndbm.o kvs-gdbm.o kvs-bdb.o kvs-qdbm.o
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF

@@ -87,7 +87,7 @@ namespace {
     closedir(dp);
   }
 
-  static string dbm_name(const string &dir_path, const char *dbname, const char *suffix = "gdbm") {
+  static string dbm_name(const string &dir_path, const char *dbname, const char *suffix = ".gdbm") {
     string db_path(dir_path);
     if (!db_path.empty()) db_path += "/";
     db_path += dbname;
@@ -134,9 +134,9 @@ namespace {
 
     string dbm_path = dbm_name(db_dir_path, dbname);
     GDBM_FILE dbm = gdbm_open((char *)dbm_path.c_str(), block_size, flag, 0777, 0);
-    if (!dbm) {
-      elog("gdbm_open %s ,%s(%#0x):(%d):%s\n", 
-	   dbm_path.c_str(), saved_mode, flag, gdbm_errno, gdbm_strerror(gdbm_errno));
+    if (gdbm_errno) {
+      elog("gdbm_open %s,%d,%s(%#0x):(%d):%s\n", 
+	   dbm_path.c_str(), block_size, saved_mode, flag, gdbm_errno, gdbm_strerror(gdbm_errno));
       return 0;
     }
 
