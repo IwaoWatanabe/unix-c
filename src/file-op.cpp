@@ -880,10 +880,12 @@ namespace {
 
 namespace uc {
 
-  static Local_File *create_Local_File() {
+  /// ローカル・ファイル操作の基本機能を提供するインスタンスを入手する。
+  extern Local_File *create_Local_File() {
     return new Local_File_Impl();
   }
 
+  /// ローカル・ファイル操作の基本機能を提供するインスタンスを入手する。
   Local_File *Local_File::create_Local_File_instance(const char *type) {
     return create_Local_File();
   }
