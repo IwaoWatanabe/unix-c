@@ -246,7 +246,7 @@ namespace {
     virtual MYSQL *handler();
     virtual void disconnect();
     virtual bool query(const std::string &query_text, bool store = false);
-    virtual mysqlpp::ResultSet *get_result();
+    virtual mysqlpp::Result *get_result();
     virtual unsigned long insert_id();
     virtual unsigned long affected_rows();
     virtual bool select_db(const char *dbname);
@@ -508,11 +508,11 @@ namespace {
   }
 
   /// 結果セットを入手する
-  mysqlpp::ResultSet *
+  mysqlpp::Result *
   My_Connection_Impl::get_result()
   {
     if (!last_result) return NULL;
-    mysqlpp::ResultSet *rs = new mysqlpp::ResultSet(last_result);
+    mysqlpp::Result *rs = new mysqlpp::Result(last_result);
     last_result = 0;
     return rs;
   }
@@ -810,14 +810,14 @@ namespace {
 namespace mysqlpp {
 
   unsigned int
-  ResultSet::num_fields()
+  Result::num_fields()
   {
     if (res) return mysql_num_fields(res);
     return 0;
   }
 
   MYSQL_FIELD *
-  ResultSet::fetch_field(int idx)
+  Result::fetch_field(int idx)
   {
     if (!res) return NULL;
     if (idx < 0) return mysql_fetch_field(res);
@@ -825,7 +825,7 @@ namespace mysqlpp {
   }
 
   MYSQL_ROW
-  ResultSet::fetch_row()
+  Result::fetch_row()
   {
     if (res) return mysql_fetch_row(res);
     return 0;
@@ -837,18 +837,18 @@ namespace mysqlpp {
      もしくは結果セット中のすべての列を復元した後に呼び出すとNULLを戻します。
   */
   unsigned long *
-  ResultSet::fetch_length()
+  Result::fetch_length()
   {
     if (res) return mysql_fetch_lengths(res);
     return 0;
   }
 
   void
-  ResultSet::free()
+  Result::free()
   {
     if (res) {
       mysql_free_result(res);
-      fprintf(stderr,"DEBUG: ResultSet#free_result %p\n", res);
+      fprintf(stderr,"DEBUG: Result#free_result %p\n", res);
     }
     res = 0;
   }

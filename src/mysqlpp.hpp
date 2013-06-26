@@ -19,13 +19,13 @@ namespace mysqlpp {
      実装クラスはコンテナが提供する。
      処理終了後は関連リソースを解放する。
   */
-  class ResultSet {
+  class Result {
   protected:
     MYSQL_RES *res;
 
   public:
-    ResultSet(MYSQL_RES *result) : res(result) { }
-    virtual ~ResultSet() { free(); }
+    Result(MYSQL_RES *result) : res(result) { }
+    virtual ~Result() { free(); }
     /// カラム件数を得る
     virtual unsigned int num_fields();
     /// カラム情報を得る
@@ -140,7 +140,7 @@ namespace mysqlpp {
     /// クエリを実行する
     virtual bool query(const std::string &query_text, bool store = false) = 0;
     /// 結果セットを入手する
-    virtual ResultSet *get_result() = 0;
+    virtual Result *get_result() = 0;
     /// クエリにより影響があった行数を入手する
     virtual unsigned long insert_id() = 0;
     /// AUTO_INCREMENT インデックスを利用した最後のクエリが生成したIDを返す
