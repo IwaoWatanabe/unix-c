@@ -807,6 +807,8 @@ namespace {
 
 };
 
+/// MySQL データベースを操作する一連の機能が含まれる
+
 namespace mysqlpp {
 
   unsigned int
