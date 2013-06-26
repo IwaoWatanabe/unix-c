@@ -2,13 +2,13 @@
 CXXFLAGS = -g -fexceptions
 CXXFLAGS += -pthread -D_REENTRANT -DUSE_SUBCMD
 LDFLAGS= -lstdc++ 
-ALL_MODULE=hello cat01
+ALL_MODULE =hello cat01
 ALL_MODULE += app01
 ALL_MODULE += app02
 ALL_MODULE += env01
 ALL_MODULE += app03
 ALL_MODULE += app04
-ALL_MODULE += header-test.o
+TEST_MODULE = header-test.o
 
 LDFLAGS += -lpthread
 ifdef USE_MOTIF
@@ -53,7 +53,7 @@ MYBINDIR=${PREFIX}
 MYDOCDIR=${PREFIX}/docs
 DESTDIR=
 
-all: uc $(ALL_MODULE)
+all: uc $(ALL_MODULE) $(TEST_MODULE)
 
 uc:
 	test -L uc || ln -s . uc
@@ -67,21 +67,25 @@ APP03_OBJS = app03.o subcmd.o
 APP03_OBJS += term.o
 app03: $(APP03_OBJS)
 
-APP04_OBJS = app04.o subcmd.o 
-APP04_OBJS += temp.o stl.o
-APP04_OBJS += term.o
-APP04_OBJS += csv-util.o csv-tool.o mbs.o
-APP04_OBJS += times.o logger.o ini.o datetime.o
-APP04_OBJS += stdc.o
+APP04_OBJS = app04.o temp.o
+LIBUC_OBJ = subcmd.o 
+LIBUC_OBJS += times.o logger.o ini.o datetime.o
+LIBUC_OBJS += csv-util.o csv-tool.o 
+LIBUC_OBJS += file-op.o lineread.o mbs.o
+LIBUC_OBJS += stdc.o stl.o
+LIBUC_OBJS += term.o
+LIBUC_OBJS += xml.o
+LIBUC_OBJS += kvs-util.o kvs-bdb.o
+LIBUC_OBJS += kvs-ndbm.o
+LIBUC_OBJS += kvs-gdbm.o
+LIBUC_OBJS += kvs-qdbm.o
+LIBUC_OBJS += mysql-driver.o
+LIBUC_OBJS += xt-proc.o
+LIBUC_OBJS += awt-util.o SmeCascade.o
+LIBUC_OBJS += index.o
+
 APP04_OBJS += xwin.o 
-APP04_OBJS += xt-proc.o
-APP04_OBJS += awt.o awt-util.o SmeCascade.o
-APP04_OBJS += file-op.o
-APP04_OBJS += lineread.o
-APP04_OBJS += index.o
-APP04_OBJS += xml.o
-APP04_OBJS += kvs-util.o kvs-ndbm.o kvs-gdbm.o kvs-bdb.o kvs-qdbm.o
-APP04_OBJS += mysql-driver.o
+APP04_OBJS += awt.o
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF
@@ -98,7 +102,12 @@ CXXFLAGS += -I$(OPENWIN_HOME)/include -DUSE_XVIEW
 APP04_OBJS += olt.o 
 endif
 
-app04: $(APP04_OBJS)
+libuc.a: $(LIBUC_OBJS)
+	$(AR) r $@ $(LIBUC_OBJS)
+
+lib: libuc.a
+
+app04: $(APP04_OBJS) libuc.a
 
 header-test.o: subcmd.h xt-proc.h
 subcmd.o: subcmd.h
@@ -116,7 +125,10 @@ rpm:
 
 install: all
 	mkdir -p  $(DESTDIR)$(MYBINDIR)
-	install -c -t $(DESTDIR)$(MYBINDIR) $(ALL_MODULE) run.sh
+	install -c -t $(DESTDIR)$(MYBINDIR) $(ALL_MODULE) run.sh *.uid
+	install -c -t $(DESTDIR)$(MYBINDIR) *.a
+	mkdir -p  $(DESTDIR)$(MYBINDIR)/uc
+	install -c -t $(DESTDIR)$(MYBINDIR)/uc *.h *.hpp
 	doxygen
 	mkdir -p $(DESTDIR)$(MYDOCDIR) 
 	test -d html && cp -Rf html $(DESTDIR)$(MYDOCDIR) || true

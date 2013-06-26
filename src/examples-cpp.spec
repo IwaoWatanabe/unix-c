@@ -8,7 +8,10 @@ URL: https://github.com/IwaoWatanabe/unix-c
 Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: doxygen libXaw-devel openmotif-devel ncurses-devel
-Requires: libXaw ncurses openmotf
+BuildRequires: readline-devel libxml2-devel mysql-devel 
+BuildRequires: db4-devel gdbm-devel qdbm-devel senna-devel
+Requires: libXaw ncurses openmotif readline libxml2 mysql 
+Requires: db4 gdbm qdbm mecab senna libz
 
 %define prefix /opt/examples-cpp
 
@@ -25,12 +28,15 @@ UNIX C/C++ sample codes.
 make USE_MOTIF=1
 
 %install
+
 rm -rf $RPM_BUILD_ROOT
+rm -rf $RPM_BUILD_ROOT/../docs
 make DESTDIR=%buildroot install
 
 mkdir -p $RPM_BUILD_ROOT%prefix/config $RPM_BUILD_ROOT%prefix/work
 chmod a+w $RPM_BUILD_ROOT%prefix/config 
 chmod a+rwx,o+t $RPM_BUILD_ROOT%prefix/work
+scp -pr ../docs/html $RPM_BUILD_ROOT%prefix/api-docs
 
 %clean
 rm -rf $RPM_BUILD_ROOT
