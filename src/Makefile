@@ -43,7 +43,7 @@ LDFLAGS += `xml2-config --libs`
 CXXFLAGS += `mysql_config --cflags`
 LDFLAGS += `mysql_config --libs_r`
 
-VERSION=0.1
+VERSION=0.1.0
 RPMBASE=~/rpm/SOURCES
 
 APP_NAME=examples-cpp
@@ -68,7 +68,7 @@ APP03_OBJS += term.o
 app03: $(APP03_OBJS)
 
 APP04_OBJS = app04.o temp.o
-LIBUC_OBJ = subcmd.o 
+LIBUC_OBJS = subcmd.o 
 LIBUC_OBJS += times.o logger.o ini.o datetime.o
 LIBUC_OBJS += csv-util.o csv-tool.o 
 LIBUC_OBJS += file-op.o lineread.o mbs.o

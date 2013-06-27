@@ -1,6 +1,6 @@
 Summary: UNNIX C/C++ sample codes.
 Name: examples-cpp
-Version: 0.1
+Version: 0.1.0
 Release: 1%{?dist}
 License: GPL
 Group: local
@@ -8,10 +8,11 @@ URL: https://github.com/IwaoWatanabe/unix-c
 Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
 BuildRequires: doxygen libXaw-devel openmotif-devel ncurses-devel
-BuildRequires: readline-devel libxml2-devel mysql-devel 
+BuildRequires: readline-devel libxml2-devel 
 BuildRequires: db4-devel gdbm-devel qdbm-devel senna-devel
+#BuildRequires: mysql
 Requires: libXaw ncurses openmotif readline libxml2 mysql 
-Requires: db4 gdbm qdbm mecab senna libz
+Requires: db4 gdbm qdbm mecab senna zlib
 
 %define prefix /opt/examples-cpp
 
