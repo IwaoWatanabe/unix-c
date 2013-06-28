@@ -177,6 +177,10 @@ namespace uc {
     return get_counter();
   }
 
+  Local_Text_Source *Local_Text_Source::get_instance(const char *type) {
+    return new Local_Text_Source();
+  }
+
 };
 
 // --------------------------------------------------------------------------------
@@ -248,11 +252,11 @@ namespace uc {
 
 extern "C" {
 
-  uc::Local_Text_Source *create_Local_Text_Source() {
+  extern uc::Local_Text_Source *create_Local_Text_Source() {
     return new uc::Local_Text_Source();
   }
 
-  uc::Command_Text_Source *create_Command_Text_Source() {
+  extern uc::Command_Text_Source *create_Command_Text_Source() {
     return new uc::Command_Text_Source();
   }
 

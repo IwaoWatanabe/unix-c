@@ -58,13 +58,16 @@ namespace {
 
   class My_Cursor_Impl : public mysqlpp::Cursor, uc::ELog {
   protected:
-    MYSQL_STMT *cur;
     mysqlpp::Connection *ref;
+    string cname;
     bool truncated, verbose;
 
   public:
-    My_Cursor_Impl(MYSQL_STMT *stmt, mysqlpp::Connection *conn) 
-      : mysqlpp::Cursor(stmt, conn) { }
+    My_Cursor_Impl(MYSQL_STMT *stmt, mysqlpp::Connection *conn, const char *name) 
+      : mysqlpp::Cursor(stmt, conn), cname(name)
+    {
+      init_elog("My_Cursor_Impl");
+    }
 
     virtual ~My_Cursor_Impl() { free(); }
     virtual void free();
@@ -86,11 +89,11 @@ namespace {
 
   /// 関連リソースを解放する
   void My_Cursor_Impl::free() {
-    if (cur) {
-      int rc = mysql_stmt_close(cur);
+    if (st) {
+      int rc = mysql_stmt_close(st);
       if (rc) elog(W, "while statemet closing:(%u)\n", rc);
     }
-    cur = 0;
+    st = 0;
   }
 
   void My_Cursor_Impl::release() {
@@ -100,93 +103,94 @@ namespace {
 
   /// クエリにより影響があった行数を入手する
   unsigned long My_Cursor_Impl::affected_rows() {
-    if (cur) return (unsigned long)mysql_stmt_affected_rows(cur);
+    if (st) return (unsigned long)mysql_stmt_affected_rows(st);
     return (unsigned long)-1;
   }
   
   /// AUTO_INCREMENT インデックスを利用した最後のクエリが生成したIDを返す
   unsigned long My_Cursor_Impl::insert_id() {
-    if (cur) return (unsigned long)mysql_stmt_insert_id(cur);
+    if (st) return (unsigned long)mysql_stmt_insert_id(st);
     return 0lu;
   }
   
   /// SQLテキストを設定する
   bool My_Cursor_Impl::prepare(const std::string &query_text) {
-    if (!cur) return false;
+    if (!st) return false;
 
-    int rc = mysql_stmt_prepare(cur, query_text.c_str(), query_text.size());
+    int rc = mysql_stmt_prepare(st, query_text.c_str(), query_text.size());
     if (rc != 0) {
-      elog("prepare failure:(%u):%s\n", mysql_stmt_errno(cur), mysql_stmt_error(cur));
-      elog(T, "\t%s\n", query_text.c_str());
+      elog("prepare failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
     }
+
+    elog(T, "prepared: %s\n %s\n", cname.c_str(), query_text.c_str());
     return rc == 0;
   }
 
   /// 結果セットのリソースを解放する
   void My_Cursor_Impl::free_result() {
-    if (!cur) return;
-    my_bool rc = mysql_stmt_free_result(cur);
+    if (!st) return;
+    my_bool rc = mysql_stmt_free_result(st);
     if (rc == 0) return;
-    elog(W,"free result failure:(%u):%s\n", mysql_stmt_errno(cur), mysql_stmt_error(cur));
+    elog(W,"free result failure:(%u)\n", rc);
   }
 
   /// 必要とするパラメータ数
   int My_Cursor_Impl::param_count() {
-    if (cur) return mysql_stmt_param_count(cur);
+    if (st) return mysql_stmt_param_count(st);
     return 0;
   }
 
   /// パラメータをバインドする
   bool My_Cursor_Impl::bind(MYSQL_BIND *bind) {
-    if (cur == 0) return false;
+    if (st == 0) return false;
 
-    my_bool rc = mysql_stmt_bind_param(cur, bind);
+    my_bool rc = mysql_stmt_bind_param(st, bind);
     if (rc == 0) return true;
-    elog("bind failure:(%u):%s\n", mysql_stmt_errno(cur), mysql_stmt_error(cur));
+    elog("bind failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
     return false;
   }
 
   /// 結果セットの構成カラム数を得る
   int My_Cursor_Impl::field_count() {
-    if (!cur) return 0;
-    return mysql_stmt_field_count(cur);
+    if (!st) return 0;
+    return mysql_stmt_field_count(st);
   }
 
   /// 結果セットの受け取り領域をバインドする
   bool My_Cursor_Impl::bind_result(MYSQL_BIND *bind) {
-    if (cur == 0) return false;
-    my_bool rc = mysql_stmt_bind_result(cur, bind);
+    if (st == 0) return false;
+    my_bool rc = mysql_stmt_bind_result(st, bind);
     if (rc == 0) return true;
 
-    elog("bind result failure:(%u):%s\n", mysql_stmt_errno(cur), mysql_stmt_error(cur));
+    elog("bind result failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
     return false;
   }
   
   /// クエリを実行する 
   bool My_Cursor_Impl::execute(bool populate) {
-    if (!cur) return false;
+    if (!st) return false;
 
-    int rc = mysql_stmt_execute(cur);
+    int rc = mysql_stmt_execute(st);
     if (rc != 0) {
       // 成功した場合ゼロ。エラーが起こった場合、ゼロ以外。
-      elog("execute failure:(%u):%s\n", mysql_stmt_errno(cur), mysql_stmt_error(cur));
+      elog("execute failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
       return false;
     }
     if (!populate) return true;
 
-    rc = mysql_stmt_store_result(cur);
+    rc = mysql_stmt_store_result(st);
     // 成功した場合ゼロ。エラーが起こった場合、ゼロ以外。
     if (rc == 0) return true;
 
-    elog("store result failure:(%u):%s\n", mysql_stmt_errno(cur), mysql_stmt_error(cur));
+    elog("store result failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
     return false;
   }
 
   /// 行データを取り寄せる
   bool My_Cursor_Impl::fetch() {
-    if (!cur) return false;
+    if (!st) return false;
 
-    int rc = mysql_stmt_fetch(cur);
+    int rc = mysql_stmt_fetch(st);
     switch(rc) {
     case MYSQL_DATA_TRUNCATED:
       if (!truncated) {
@@ -196,7 +200,7 @@ namespace {
     case 0:
       return true;
     case 1:
-      elog("fetch failure:(%u):%s\n", mysql_stmt_errno(cur), mysql_stmt_error(cur));
+      elog("fetch failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
     case MYSQL_NO_DATA:
       return false;
     }
@@ -208,14 +212,14 @@ namespace {
   /// 行位置を確認する
   MYSQL_ROW_OFFSET My_Cursor_Impl::row_tell() {
     // mysql_stmt_store_result()の後にだけ使える
-    if (!cur) return 0;
-    return mysql_stmt_row_tell(cur);
+    if (!st) return 0;
+    return mysql_stmt_row_tell(st);
   }
 
   /// 行位置を移動する
   MYSQL_ROW_OFFSET My_Cursor_Impl::row_seek(MYSQL_ROW_OFFSET offset) {
-    if (!cur) return 0;
-    return mysql_stmt_row_seek(cur,offset);
+    if (!st) return 0;
+    return mysql_stmt_row_seek(st, offset);
   }
 
   // --------------------------------------------------------
@@ -272,7 +276,7 @@ namespace {
 
 
   My_Connection_Impl::My_Connection_Impl()
-    : cached_info(0) { }
+    : cached_info(0) { init_elog("My_Connection_Impl"); }
 
   My_Connection_Impl::~My_Connection_Impl() {
     disconnect();
@@ -533,7 +537,6 @@ namespace {
     if (last_result) mysql_free_result(last_result);
 
     last_result = store ? mysql_use_result(conn) : mysql_store_result(conn);
-    if (!last_result || mysql_num_fields(last_result) == 0) return false;
     return true;
   }
 
@@ -554,31 +557,32 @@ namespace {
   {
     // 名前に結びついたステートメントを入手する
     map<string, My_Cursor_Impl *>::iterator it = stat.find(name);
-    if (it == stat.end()) {
-      MYSQL_STMT *st = mysql_stmt_init(conn);
-      if (!st) {
-	elog("mysql statemet %s finding:(%u):%s", 
-	     name, mysql_errno(conn), mysql_error(conn));
+    if (it != stat.end()) return (*it).second;
+
+    MYSQL_STMT *st = mysql_stmt_init(conn);
+    if (!st) {
+      elog("mysql statemet %s finding:(%u):%s", 
+	   name, mysql_errno(conn), mysql_error(conn));
+      return 0;
+    }
+
+    if (query_text) {
+      int rc = mysql_stmt_prepare(st, query_text->c_str(), query_text->size());
+      if (rc != 0) {
+	elog("prepare failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
+
+	rc = mysql_stmt_close(st);
+	if (rc) elog(W, "while statemet closing:(%u)\n", rc);
 	return 0;
       }
-
-      if (query_text) {
-	int rc = mysql_stmt_prepare(st, query_text->c_str(), query_text->size());
-	if (rc != 0) {
-	  elog("prepare failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
-
-	  rc = mysql_stmt_close(st);
-	  if (rc) elog(W, "while statemet closing:(%u)\n", rc);
-	  return 0;
-	}
-      }
-
-      // 登録する
-      My_Cursor_Impl *cur = new My_Cursor_Impl(st, this);
-      stat.insert(map<string, My_Cursor_Impl *>::value_type(name, cur));
-      return cur;
+      elog(T, "prepared: %s:%d\n %s\n", name, mysql_stmt_param_count(st), query_text->c_str());
     }
-    return (*it).second;
+
+    // 登録する
+    My_Cursor_Impl *cur = new My_Cursor_Impl(st, this, name);
+    stat.insert(map<string, My_Cursor_Impl *>::value_type(name, cur));
+
+    return cur;
   }
 
   void
@@ -661,7 +665,9 @@ namespace {
   {
     if (!conn) return;
     if (0 != mysql_set_character_set(conn, name))
-      elog(W, "mysql set names %s: %s", name, mysql_error(conn));
+      elog(W, "mysql set names %s: %s\n", name, mysql_error(conn));
+    else
+      elog(T, "character set: %s\n", name);
   }
 
   bool
@@ -1040,6 +1046,7 @@ namespace mysqlpp {
   void Connection::free_cursor_all() { }
 
   Connection_Manager::Connection_Manager() { }
+
   Connection_Manager::~Connection_Manager() { }
 
   Connection_Manager *

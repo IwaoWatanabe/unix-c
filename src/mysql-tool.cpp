@@ -2,18 +2,346 @@
  * \brief MySQL を操作する実験コード
  */
 
-#include "uc/mysqlpp.hpp"
+#include "uc/csv.hpp"
 #include "uc/elog.hpp"
+#include "uc/mysqlpp.hpp"
+#include "uc/text-reader.hpp"
 
+#include <cstdio>
+#include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
+
+
+extern uc::Local_Text_Source *create_Local_Text_Source();
 
 using namespace std;
 
 // --------------------------------------------------------
 namespace {
+
+  static MYSQL_BIND EMPTY_BIND;
+
+  // 読み込んだデータを別のファイルに書き出す
+  class DumpCSVReader : public uc::CSV_Reader, public uc::ELog {
+    string outfile;
+    FILE *fp;
+
+  protected:
+    void out_csv(const char **row, FILE *fp);
+
+  public:
+    DumpCSVReader(const char *fname) : outfile(fname), fp(0) {}
+
+    bool begin_read_csv();
+    int read_csv(const char **row, int columns);
+    void end_read_csv(bool cancel);
+  };
+
+  bool
+  DumpCSVReader::begin_read_csv() {
+    if (outfile.empty()) return false;
+
+    fp = fopen(outfile.c_str(),"a+");
+    if (!fp) {
+      elog("fopen %s failed:(%d) %s\n", outfile.c_str(), errno, strerror(errno));
+      return false;
+    }
+    return true;
+  }
+
+  void
+  DumpCSVReader::out_csv(const char **row, FILE *fp)
+  {
+    char *sep = "";
+
+    for (; *row; row++) {
+      char *p = strchr(*row, '"');
+      if (!p) p = strchr(*row, '\n');
+
+      if(!p)
+	fprintf(fp,"%s%s",sep,*row);
+      else {
+	fputs(sep,fp);
+	fputc('\"',fp);
+	for (const char *t = *row; *t; t++) {
+	  fputc(*t,fp);
+	  if (*t == '"') fputc(*t,fp);
+	}
+	fputc('\"',fp);
+      }
+      sep = ",";
+    }
+    fputc('\n',fp);
+  }
+
+  int
+  DumpCSVReader::read_csv(const char **row, int columns) {
+    if (!fp) return 1;
+    out_csv(row, fp);
+    return 0;
+  }
+
+  void
+  DumpCSVReader::end_read_csv(bool cancel) {
+    if (!fp) return;
+    if (fclose(fp) != 0) {
+      elog(W, "fclose %s failed:(%d) %s\n", outfile.c_str(), errno, strerror(errno));
+    }
+  }
+
+
+  // 読み込んだデータをMySQLのテーブルに格納する
+  /*
+    CSVフィールドとテーブルのカラムの対応は定義ファイルで渡す
+    定義ファイルは、サフィックスを取り除いて、そのままテーブル名として利用される。
+   */
+  class StoreTable_CSV_Reader : public DumpCSVReader {
+    string ctrl_file;
+
+    /// 取り込み対象とするCSVカラム位置リストが格納される
+    vector<int> poslist;
+
+    mysqlpp::Connection *conn;
+    mysqlpp::Cursor *cur;
+    MYSQL_BIND *params;
+    unsigned long *column_length;
+
+    void show_cmap(map<string, int> &cmap, FILE *fp);
+    void load_column_list(const char *fname, map<string, int> &cmap);
+    void build_insert_query(string &qbuf, 
+			    const vector<string> &cnames, 
+			    const map<string, int> &column_map);
+  public:
+    int counter, max_records;
+
+    StoreTable_CSV_Reader(const char *fname, mysqlpp::Connection *port)
+      : DumpCSVReader(""), ctrl_file(fname), conn(port), counter(0), max_records(200000) { }
+
+    bool begin_read_csv();
+    int read_csv(const char **row, int columns);
+    void end_read_csv(bool cancel);
+  };
+
+  /// CSVの読み位置と、テーブルのカラムの対応を出力する
+  void
+  StoreTable_CSV_Reader::show_cmap(map<string, int> &cmap, FILE *fp)
+  {
+    fprintf(fp,"------- load map -------\n");
+
+    map<string, int>::iterator it = cmap.begin();
+    while (it != cmap.end()) {
+      fprintf(fp,"%s: %d\n", (it->first).c_str(), it->second);
+      it++;
+    }
+  }
+
+  /// テキストの前後の空白文字を詰める
+
+  char *trim(char *t) {
+      while(isspace(*t)) *t++;
+      /*
+	先頭の空白文字をスキップ
+       */
+
+      size_t len = strlen(t);
+      char *u = t + len - 1;
+      while (u > t && isspace(*u)) u--;
+      u[1] = 0;
+      /*
+	末尾の空白文字を詰める
+       */
+      return t;
+  }
+
+  /// テーブルに取り込むカラム名を記述したファイルを読込む
+  void
+  StoreTable_CSV_Reader::load_column_list(const char *cfname, map<string, int> &cmap)
+  {
+    auto_ptr<uc::Local_Text_Source> src(new uc::Local_Text_Source());
+
+    if (!src->open_read_ffile(cfname)) return;
+
+    cmap.clear();
+
+    /// CSVで読み込むデータのカラム名を保持する
+    vector <string> flist;
+
+    char *t;
+
+    // 行単位でカラム名を記述する
+    while ((t = src->read_line()) != NULL) {
+      if (*t == '#') continue;
+      t = trim(t);
+      if (!*t) continue; // 空行はスキップ
+
+      flist.push_back(t);
+    }
+
+    src->close_source();
+
+    // カラム名と桁位置の対応が記録される
+    //fprintf(stderr,"------- cols -------\n");
+
+    for (int i = 0, n = flist.size(); i < n; i++) {
+      cmap.insert( map<string, int>::value_type( flist[i], i ));
+      //fprintf(stderr,"%d:%s\n", i, flist[i].c_str());
+    }
+
+    show_cmap(cmap, stderr);
+  }
+
+  void
+  StoreTable_CSV_Reader::build_insert_query(string &qbuf, 
+					    const vector<string> &cnames, 
+					    const map <string, int> &column_map) {
+    poslist.clear();
+
+    const char *tp = "(";
+
+    for (int i = 0,n = cnames.size(); i < n; i++) {
+      map<string, int>::const_iterator it = column_map.find(cnames[i]);
+
+      if (it != column_map.end()) {
+	fprintf(stderr,"%s => %d\n", cnames[i].c_str(), it->second);
+	qbuf += tp;
+	qbuf += cnames[i];
+	tp = ",";
+	poslist.push_back(it->second);
+      }
+    }
+
+    tp = ") VALUES (";
+
+    for (int i = 0, n = poslist.size(); i < n; i++) {
+      qbuf += tp;
+      qbuf += "?";
+      tp = ",";
+    }
+
+    qbuf += ")";
+  }
+
+
+  // データ移行のカラム・マップ定義ファイルを読み込む
+  bool
+  StoreTable_CSV_Reader::begin_read_csv()
+  {
+    /// CSVで読み込むデータ読み込位置を格納
+    /// KEYはフィールド名。VALUEはそのフィールドのカラム位置
+    map<string, int> src_column_map;
+
+    // 対象CSVのフィールド名定義を読み込む
+    load_column_list(ctrl_file.c_str(), src_column_map);
+
+    if (src_column_map.empty()) {
+      fprintf(stderr,"no control entry\n");
+    }
+
+    char *tp0 = strdup(ctrl_file.c_str()), *tp = basename(tp0), *p = strchr(tp, '.');
+    string tbl(tp, p - tp);
+
+    free(tp0);
+
+
+    fprintf(stderr,"=======\n");
+
+    fprintf(stderr,"target tables: %s\n", tbl.c_str());
+
+    // 現行のテーブルの定義済カラム名を入手
+    vector<string> cnames;
+
+    conn->fetch_column_names(cnames, tbl.c_str());
+
+    if (cnames.empty()) {
+      fprintf(stderr,"ERRROR: not exists or cannot fetch column name\n");
+      return false;
+    }
+
+    /// 取り込みテーブルのデータを削除
+    string qbuf;
+    qbuf = "DELETE FROM ";
+    if (conn->query(qbuf.append(tbl))) {
+      elog(I, "%lu recored deleted before import.", conn->affected_rows());
+    }
+
+    /// SQLの組み立て
+    qbuf = "INSERT INTO ";
+
+    build_insert_query(qbuf.append(tbl), cnames, src_column_map);
+    if (poslist.empty()) {
+      fprintf(stderr,"no match column entry.\n");
+      return false;
+    }
+
+    /// カーソルの準備
+
+    string qname(tbl);
+    cur = conn->find_cursor(qname.append("-INSERT").c_str(), &qbuf);
+    if (!cur) return false;
+
+    int n_params = cur->param_count();
+    params = new MYSQL_BIND[n_params];
+
+    for (int i = 0; i < n_params; i++) {
+      params[i] = EMPTY_BIND;
+      params[i].buffer_type= MYSQL_TYPE_STRING;
+      params[i].buffer= 0;
+      params[i].is_null= 0;
+      params[i].length = 0;
+    }
+
+    counter = 0;
+
+    conn->set_autocommit(false);
+
+    return true;
+  }
+
+  int
+  StoreTable_CSV_Reader::read_csv(const char **row, int columns)
+  {
+    // ここでは bind して executeの繰り返し
+
+    int n_params = cur->param_count();
+
+    for (int i = 0; i < n_params; i++) {
+      int pos = poslist[i];
+
+      size_t len = strlen(row[pos]);
+      params[i].buffer = (void *)row[pos];
+      params[i].buffer_length = len;
+    }
+
+    if (counter % 2000 == 0) {
+      conn->commit();
+      putc('.', stderr);
+    }
+
+    if (!cur->bind(params)) return 1;
+
+    if (!cur->execute(params)) {
+      // TODO: reject データをどうしよう
+      return 1;
+    }
+
+    return ++counter < max_records ? 0 : 1;
+  }
+
+  void
+  StoreTable_CSV_Reader::end_read_csv(bool cancel)
+  {
+    if (cancel)
+      conn->rollback();
+    else
+      conn->commit();
+
+    // 後始末
+    delete [] params;
+  }
 
 };
 
@@ -200,6 +528,54 @@ extern "C" {
   }
 
 
+  /// CSVを読み込んでそのまま別ファイルに出力する
+  static int
+  cmd_csv01(int argc, char **argv)
+  {
+    const char *csv_file = getenv("CSV_IN");
+    if (!csv_file) csv_file = "work/aa.csv";
+
+    const char *csv_out_file = getenv("CSV_OUT");
+    if (!csv_out_file) csv_out_file = "work/bb.csv";
+
+    load_csv(csv_file, new DumpCSVReader(csv_out_file));
+    return EXIT_SUCCESS;
+  }
+
+  /// CSVを読み込んでテーブルに登録する
+  static int
+  cmd_csv02(int argc, char **argv)
+  {
+    auto_ptr<mysqlpp::Connection_Manager> cm(mysqlpp::Connection_Manager::get_instance());
+
+    if (optind == argc) {
+      puts("usage");
+      return EXIT_FAILURE;
+    }
+
+    const char *alias = argv[optind];
+
+    mysqlpp::Connection *conn = cm->get_Connection(alias);
+    if (!conn) {
+      elog("%s cannot get connection\n", alias);
+      return EXIT_FAILURE;
+    }
+
+    conn->set_character_set("utf8");
+
+    /// 郵政省のデータベースを読み込む
+    const char *csv_file = getenv("KEN_ALL");
+    if (!csv_file) csv_file = "work/KEN_ALL-utf8.csv";
+
+    /// カラム名の対応
+    /// ファイル名がテーブル名として利用される。
+    const char *column_file = getenv("COLS");
+    if (!column_file) column_file = "work/wdzip03e.cols";
+
+    load_csv(csv_file, new StoreTable_CSV_Reader(column_file, conn));
+
+    return EXIT_SUCCESS;
+  }
 
 };
 
@@ -210,6 +586,8 @@ extern "C" {
 #include "subcmd.h"
 
 subcmd mysql_cmap[] = {
+  { "csv-load", cmd_csv01, },
+  { "csv-import", cmd_csv02, },
   { "mysql-account", cmd_my_account, },
   { "mysql-query", cmd_my_report, },
   { 0 },

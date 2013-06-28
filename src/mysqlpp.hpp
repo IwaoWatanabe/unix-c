@@ -62,13 +62,13 @@ namespace mysqlpp {
   */
   class Cursor : Resource {
   protected:
-    MYSQL_STMT *cur;
+    MYSQL_STMT *st;
     Connection *ref;
     bool truncated, verbose;
 
   public:
     Cursor(MYSQL_STMT *stmt, Connection *conn) 
-      : cur(stmt), ref(conn), truncated(false), verbose(false) { }
+      : st(stmt), ref(conn), truncated(false), verbose(false) {  }
 
     virtual ~Cursor() = 0;
     /// このカーソルと連携するコネクションを得る

@@ -99,6 +99,8 @@ namespace uc {
     Local_Text_Source();
     ~Local_Text_Source();
 
+    static Local_Text_Source *get_instance(const char *type = "");
+
     /// ファイルの読み込みを開始する
     virtual bool open_read_file(const char *file_name);
     virtual bool open_read_ffile(const char *file_pattern, ...);
