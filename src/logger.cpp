@@ -246,6 +246,8 @@ extern "C" {
 namespace uc {
 
   ELog::ELog() : mgr(0), ident("") { }
+  ELog::ELog(const char *ident) : mgr(0), ident("") { init_elog(ident); }
+
   ELog::~ELog() { if (mgr) ((ELog_Manager *)mgr)->reopen(); }
 
   static ELog_Manager *default_elog_manager;
@@ -270,32 +272,52 @@ namespace uc {
   ELog::elog(const char *format, ...) {
     va_list args;
     va_start(args, format);
-    int ct = mgr ? ((ELog_Manager *)mgr)->vlog(E, format, args) : 
-      vfprintf(stderr,format, args);
+    int ct = velog(E, format, args);
     va_end(args);
     return ct;
   }
 
   int
   ELog::elog(int level, const char *format, ...) {
-    if (!mgr) return 0;
     va_list args;
     va_start(args, format);
-    int ct = mgr ? ((ELog_Manager *)mgr)->vlog(level, format, args) : 
-      vfprintf(stderr,format, args);
+    int ct = velog(level, format, args);
     va_end(args);
     return ct;
   }
 
   int
   ELog::velog(int level, const char *format, va_list args) {
-    if (!mgr) return 0;
     int ct = mgr ? ((ELog_Manager *)mgr)->vlog(level, format, args) : 
       vfprintf(stderr,format, args);
+    if (!mgr) {
+      size_t len = strlen(format);
+      if (len && format[len - 1] != '\n') fputc('\n',stderr), ct++;
+    }
     return ct;
   }
-
 };
+
+ELog::ELog app_log(get_process_name());
+
+/// プロセス汎用のログ出力
+extern int elog(const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  int ct = app_log.velog(ELog::E, format, args);
+  va_end(args);
+  return ct;
+}
+
+/// プロセス汎用のログ出力(レベル指定)
+extern int elog(int level, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  int ct = app_log.velog(level, format, args);
+  va_end(args);
+  return ct;
+}
+
 
 // --------------------------------------------------------------------------------
 

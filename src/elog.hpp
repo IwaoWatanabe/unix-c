@@ -36,6 +36,7 @@ namespace uc {
     /// ログレベル
     enum Level { F, E, W, N, I, A, D, T };
     ELog();
+    ELog(const char *ident);
     virtual ~ELog();
     /// ログ初期化
     virtual void init_elog(const char *ident);
@@ -48,6 +49,9 @@ namespace uc {
   };
 
 };
+
+extern int elog(const char *format, ...);
+extern int elog(int level, const char *format, ...);
 
 #endif
 
