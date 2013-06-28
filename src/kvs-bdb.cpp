@@ -222,6 +222,10 @@ namespace {
       elog(W, "cursor for %s alreay created.\n", db_name.c_str());
       return;
     }
+    if (!db) {
+      elog(W, "not bdb opened.\n");
+      return;
+    }
 
     int rc = db->cursor(db, NULL, &cursor, 0);
     if (rc != 0) {

@@ -28,6 +28,9 @@ namespace uc {
 
     /// 基準ディレクトリの設定
     virtual bool set_kvs_directory(const char *dir) = 0;
+    /// 基準ディレクトリの設定(書式付)
+    virtual bool set_kvs_fdirectory(const char *format, ...);
+
     /// 基準ディレクトリの入手
     virtual std::string &get_kvs_directory() { return db_dir_path; }
 
@@ -38,12 +41,20 @@ namespace uc {
 
     /// データベース利用開始
     virtual int open_kvs(const char *dbname, const char *mode) = 0;
+    /// データベース利用開始(書式付)
+    virtual int open_fkvs(const char *db_format, const char *mode, ...);
     /// 値の入手
     virtual bool fetch_value(const char *key, std::string &value) = 0;
+    /// 値の入手(書式付)
+    virtual bool fetch_fvalue(const char *key_format, std::string &value, ...);
     /// 値の登録
     virtual bool store_value(const char *key, const char *value) = 0;
+    /// 値の登録(書式付)
+    virtual bool store_fvalue(const char *key_format, const char *value, ...);
     /// 登録キー名の確認
     virtual bool has_key(const char *key) = 0;
+    /// 登録キー名の確認(書式付)
+    virtual bool has_fkey(const char *key_format, ...);
 
     /// 登録キー名の入手開始
     virtual void begin_next_key() = 0;

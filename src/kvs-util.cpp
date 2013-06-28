@@ -5,6 +5,7 @@
 #include "uc/kvs.hpp"
 #include "uc/local-file.hpp"
 
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <cxxabi.h>
@@ -13,6 +14,7 @@
 #include <vector>
 
 using namespace std;
+extern int vsprintf(string &buf, const char *format, va_list ap);
 
 extern uc::KVS *create_KVS_BDB_Impl();
 extern uc::KVS *create_KVS_GDBM_Impl();
@@ -39,6 +41,56 @@ namespace uc {
   void KVS::show_report(FILE *fout) {
     fprintf(fout,"KVS-Driver: %s\n"
 	    "KVS-Version: %s\n", demangle(typeid(*this).name()), get_kvs_version());
+  }
+
+  bool KVS::set_kvs_fdirectory(const char *format, ...) {
+    string buf;
+    va_list ap;
+    va_start(ap, format);
+    int n = vsprintf(buf, format, ap);
+    va_end(ap);
+    if (n == 0) return false;
+    return set_kvs_directory(buf.c_str());
+  }
+
+  int KVS::open_fkvs(const char *db_format, const char *mode, ...) {
+    string buf;
+    va_list ap;
+    va_start(ap, mode);
+    int n = vsprintf(buf, db_format, ap);
+    va_end(ap);
+    if (n == 0) return 0;
+    return open_kvs(buf.c_str(), mode);
+  }
+
+  bool KVS::fetch_fvalue(const char *key_format, std::string &value, ...) {
+    string buf;
+    va_list ap;
+    va_start(ap, value);
+    int n = vsprintf(buf, key_format, ap);
+    va_end(ap);
+    if (n == 0) return false;
+    return fetch_value(buf.c_str(), value);
+  }
+
+  bool KVS::store_fvalue(const char *key_format, const char *value, ...) {
+    string buf;
+    va_list ap;
+    va_start(ap, value);
+    int n = vsprintf(buf, key_format, ap);
+    va_end(ap);
+    if (n == 0) return false;
+    return store_value(buf.c_str(), value);
+  }
+
+  bool KVS::has_fkey(const char *key_format, ...) {
+    string buf;
+    va_list ap;
+    va_start(ap, key_format);
+    int n = vsprintf(buf, key_format, ap);
+    va_end(ap);
+    if (n == 0) return false;
+    return has_key(buf.c_str());
   }
 
   KVS *KVS::get_kvs_instance(const char *dir_path, const char *kvs_type) {
@@ -188,7 +240,6 @@ extern "C" {
       case '?': return 1;
       }
     }
-
     auto_ptr<KVS_tool> tool(new KVS_tool(dir_path, kvs_type));
 
     uc::Text_Source::set_locale(lang);
