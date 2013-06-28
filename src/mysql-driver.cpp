@@ -18,6 +18,8 @@ http://search.net-newbie.com/mysql41/clients.html
 
 using namespace std;
 
+extern "C" int ends_with(const char *target, const char *suffix);
+
 namespace {
 
   /// DBの接続情報を保持する
@@ -28,7 +30,7 @@ namespace {
     int offset(const char *tt) {
       if (!tt) return 0;
       size_t of = sbuf.size();
-      sbuf.append(tt).append('\0');
+      sbuf.append(tt).append("",1);
       return of;
     }
 
@@ -243,6 +245,7 @@ namespace {
     My_Connection_Impl();
     virtual ~My_Connection_Impl();
     virtual bool connect(mysqlpp::DB_Info *info);
+    virtual bool ping();
     virtual MYSQL *handler();
     virtual void disconnect();
     virtual bool query(const std::string &query_text, bool store = false);
@@ -250,13 +253,13 @@ namespace {
     virtual unsigned long insert_id();
     virtual unsigned long affected_rows();
     virtual bool select_db(const char *dbname);
-    virtual void get_db_names(std::vector<std::string> &name_list);
     virtual void set_character_set(const char *names);
     virtual void set_autocommit(bool flag);
     virtual void commit();
     virtual void rollback();
-    virtual void escape_string(std::string &buf, std::string &text);
+    virtual std::string &escape_string(std::string &buf, std::string &text);
     virtual int warning_count();
+    virtual void fetch_db_names(std::vector<std::string> &name_list, const char *tbl = "%");
     virtual void fetch_table_names(std::vector<std::string> &cnames, const char *tbl = "%");
     virtual void fetch_column_names(std::vector<std::string> &cnames, const char *tbl, const char *wild = "%");
     virtual bool add_resource(const char *name, mysqlpp::Resource *res);
@@ -290,12 +293,14 @@ namespace {
     
     MYSQL *res = 
       mysql_real_connect(conn, host, user, pass, name, port, socket, client_flag);
+
     if (!res) {
-      elog("mysql:%s@%s:%d/%s;socket=%s;flag=%#x (%u):%s", 
+      elog(E, "mysql:%s@%s:%d/%s;socket=%s;flag=%#x (%u):%s", 
 	   user, host, port, name, socket, client_flag,
-	   mysql_errno(res), mysql_error(res) );
+	   mysql_errno(conn), mysql_error(conn) );
       return false;
     }
+
     return true;
   }
 
@@ -322,8 +327,15 @@ namespace {
     cached_info = info;
     conn = res;
 
-    elog(T, "connected: %p\n", this);
+    elog(T, "connected: %s\n", mysql_get_host_info(conn));
     return true;
+  }
+
+  bool
+  My_Connection_Impl::ping()
+  {
+    if (!conn) return false;
+    return mysql_ping(conn) == 0;
   }
 
   MYSQL *
@@ -332,10 +344,7 @@ namespace {
     assert(cached_info);
 
     if (conn) {
-      // サーバとの接続が切れているときは、mysql_close()して接続しなおす
-      // 違うDBを参照している可能性があるため、カレントDBを変えておく
-      if (mysql_ping(conn) == 0 && 
-	  mysql_select_db(conn, cached_info->get_db_name()) == 0) return conn;
+      if (ping() && mysql_select_db(conn, cached_info->get_db_name()) == 0) return conn;
 
       const char *host = mysql_get_host_info(conn);
       elog(W, "dead mysql connection %s closing.\n", host);
@@ -363,6 +372,27 @@ namespace {
     elog("cannot change db:(%u): %s\n",
 	 mysql_errno(conn), mysql_error(conn) );
     return false;
+  }
+
+  void My_Connection_Impl::fetch_db_names(vector<string> &cnames, const char *db)
+  {
+    cnames.clear();
+
+    MYSQL_RES *rs = mysql_list_dbs (conn, db);
+    if (!rs) {
+      elog(W, "cannot fetch database names:%s:(%u): %s\n",
+	   db, mysql_errno(conn), mysql_error(conn) );
+      return;
+    }
+
+    MYSQL_ROW row;
+
+    while ((row = mysql_fetch_row(rs))) {
+      unsigned long *lengths = mysql_fetch_lengths(rs);
+      cnames.push_back(string(row[0], lengths[0]));
+    }
+
+    mysql_free_result(rs);
   }
 
   /// テーブル名を入手する
@@ -615,19 +645,15 @@ namespace {
     return mysql_warning_count(conn);
   }
 
-  void
+  string &
   My_Connection_Impl::escape_string(string &buf, string &text)
   {
-    if (!conn) return;
+    if (!conn) return buf;
     char *wbuf = new char[text.size() * 2 + 1];
     size_t len = mysql_real_escape_string(conn, wbuf, text.c_str(), text.size());
     buf.append(wbuf, len);
     delete wbuf;
-  }
-
-  void My_Connection_Impl::get_db_names(vector<string> &name_list)
-  {
-    
+    return buf; 
   }
 
   void
@@ -675,36 +701,12 @@ namespace {
     }
   }
 
-  static void show_db_info(FILE *fp, MYSQL *my)
-  {
-    if (!my) return;
-
-    // MySQLクライアントライブラリ・バージョンを表す文字ストリング
-    const char *client = mysql_get_client_info();
-    // クライアントライブラリ・バージョンを表す整数
-    unsigned long client_ver = mysql_get_client_version();
-    // 現在の接続によって使われたプロトコルのバージョンを表す無署名の整数
-    unsigned int proto = mysql_get_proto_info(my);
-
-    // サーバのバージョンナンバーを表すストリング
-    const char *server_info = mysql_get_server_info(my);
-    // MySQLサーバー・バージョンを表す
-    unsigned long server_ver = mysql_get_server_version(my);
-    // サーバーホスト名と接続タイプを示す文字
-    const char *host = mysql_get_host_info(my);
-
-    fprintf(stderr,"MySQL Server %s:%lu (%s)\n", server_info, server_ver, host);
-    fprintf(stderr,"MySQL Client %s:%lu, Protocol:%u\n", client, client_ver, proto);
-    
-    // クライアントがスレッドセーフとしてコンパイルされたかどうかを示す
-    // クライアントがスレッドセーフの場合は 1、それ以外の場合は 0
-    fprintf(stderr,"Thread Safe Library: %u: Thread ID: %lu\n", mysql_thread_safe(), mysql_thread_id(my));
-  }
-
   // --------------------------------------------------------
 };
 
+#include "uc/datetime.hpp"
 #include "uc/kvs.hpp"
+#include "memory"
 
 namespace {
 
@@ -723,54 +725,179 @@ namespace {
   /// 素朴な　Connection_Manager　の実装
   class Connection_Manager_Impl : public mysqlpp::Connection_Manager, uc::ELog {
     /// 設定情報を保存するkvs
-    uc::KVS *db;
+    uc::KVS *props;
     /// 接続インスタンスを保持する
     map<string,mysqlpp::Connection *>cmap;
+    static const char *auth_dbname;
 
   public:
     Connection_Manager_Impl() {
       init_elog("Connection_Manager_Impl");
       const char *path = "work", *type = "bdb";
-      db = uc::KVS::get_kvs_instance(path, type);
+      props = uc::KVS::get_kvs_instance(path, type);
     }
 
     ~Connection_Manager_Impl() {
       close_all_connection();
-      delete db;
+      delete props;
     }
 
     virtual void get_db_names(vector<string> &name_list);
     virtual void store_db_parameter(const char *name, const map<string,string> &params);
-    virtual void fetch_db_parameter(const char *name, map<string,string> &params);
+    virtual bool fetch_db_parameter(const char *name, map<string,string> &params);
     virtual mysqlpp::DB_Info *get_DB_Info(const char *name);
     virtual mysqlpp::Connection *get_Connection(const char *name = 0);
     virtual const char *get_last_connection();
     virtual void close_all_connection();
+    virtual void drop_db_parameter(const char *name);
   };
+
+  const char *Connection_Manager_Impl::auth_dbname = "auth";
+
+  /// 名前の一覧を出力する
+  static void show_names(FILE *fout, const vector<string> &names, const char *sep = ", ") {
+    vector<string>::const_iterator it = names.begin();
+    const char *rsep = "";
+    for (;it != names.end(); it++) {
+      fprintf(fout,"%s%s",rsep, it->c_str());
+      rsep = sep;
+    }
+    if (!names.empty()) fputc('\n',fout);
+  }
+
+  /// 設定の一覧を出力する
+  static void show_params(FILE *fout, const map<string, string> &params, const char *sep = "=") {
+    map<string,string>::const_iterator it = params.begin();
+    for (;it != params.end(); it++) {
+      fprintf(fout,"%s%s%s\n",it->first.c_str(),sep,it->second.c_str());
+    }
+  }
+
+  /// キーの一式を入手する
+  // 巨大なデータを扱う場合はメモリに注意
+  static void fetch_keys(vector<string> &keys, uc::KVS *kvs)
+  {
+    string key;
+    kvs->begin_next_key();
+    while (kvs->fetch_next_key(key)) {
+      keys.push_back(key);
+    }
+    kvs->end_next_key();
+  }
+
+  /// サフィックスが合致するキーの一覧を入手する
+  static void fetch_suffix_match_keys(const char *suffix, vector<string> &keys, 
+				      uc::KVS *kvs, bool trim = true)
+  {
+    string key;
+    size_t slen = strlen(suffix);
+
+    kvs->begin_next_key();
+    while (kvs->fetch_next_key(key)) {
+      if (ends_with(key.c_str(), suffix)) {
+	if (trim) key.resize(key.size() - slen);
+	keys.push_back(key);
+      }
+    }
+    kvs->end_next_key();
+  }
+
+  /// プレフィックスが合致するキーの一覧を入手する
+  static void fetch_prefix_match_keys(const char *prefix, vector<string> &keys, 
+				      uc::KVS *kvs, bool trim = true)
+  {
+    size_t plen = strlen(prefix);
+    string key;
+    kvs->begin_next_key();
+    while (kvs->fetch_next_key(key)) {
+      if (strncmp(key.c_str(), prefix, plen) == 0) {
+	if (trim) key.erase(0, plen);
+	keys.push_back(key);
+      }
+    }
+    kvs->end_next_key();
+  }
+
 
   /// 登録済み接続名の入手
   void
   Connection_Manager_Impl::get_db_names(vector<string> &name_list)
   {
+    props->open_kvs(auth_dbname, "r");
+    fetch_suffix_match_keys(".mysql.dd.stored", name_list, props);
   }
 
   /// 接続情報の保存
   void
   Connection_Manager_Impl::store_db_parameter(const char *name, const map<string,string> &params)
   {
+    props->open_kvs(auth_dbname, "w");
+
+    string pname(name);
+
+    uc::Date ti;
+    pname += ".mysql.dd.stored";
+    props->store_value(pname.c_str(), ti.now().get_date_text(0).c_str());
+
+    map<string,string>::const_iterator it = params.begin();
+    for (;it != params.end(); it++) {
+      pname = name;
+      pname += ".mysql.";
+      pname += it->first.c_str();
+      props->store_value(pname.c_str(), it->second.c_str());
+    }
+    
+    props->close_kvs();
   }
 
   /// 接続情報の入手
-  void
+  bool
   Connection_Manager_Impl::fetch_db_parameter(const char *name, map<string,string> &params)
   {
+    props->open_kvs(auth_dbname, "r");
+    string prefix(name);
+    prefix += ".mysql.";
+
+    vector<string> pkeys;
+    fetch_prefix_match_keys(prefix.c_str(), pkeys, props);
+    show_names(stdout, pkeys);
+
+    params.clear();
+    vector<string>::const_iterator it = pkeys.begin();
+
+    for (;it != pkeys.end(); it++) {
+      if (strncmp("dd.", it->c_str(), 3) == 0) continue;
+      string pval, pname(prefix);
+      pname += *it;
+      if (!props->fetch_value(pname.c_str(), pval)) continue;
+      params.insert(map<string, string>::value_type(*it,pval));
+    }
+
+    return true;
+  }
+
+  const char *param_value(const char *key, map<string,string> &params, const char *default_value = "") {
+    string kbuf(key);
+    map<string,string>::const_iterator it = params.find(key);
+    if (it == params.end()) return default_value;
+    return it->second.c_str();
   }
 
   /// 接続情報の入手
   mysqlpp::DB_Info *
   Connection_Manager_Impl::get_DB_Info(const char *name)
   {
+    map<string,string> params;
+    if (!fetch_db_parameter(name, params)) return 0;
+
     My_DB_Info02 info;
+    info.name = param_value("db",params);
+    info.user = param_value("user",params);
+    info.passwd = param_value("password",params);
+    info.socket = param_value("socket",params);
+    info.host = param_value("host",params, "localhost");
+    info.port = param_value("port",params);
+
     return new My_DB_Info(info);
   }
 
@@ -780,13 +907,18 @@ namespace {
   {
     map<string,mysqlpp::Connection *>::iterator it = cmap.find(name);
     if (it != cmap.end()) { return it->second; }
+    /*
+      接続済みであれば、それを返す
+     */
     
-    mysqlpp::Connection *conn = new My_Connection_Impl();
     mysqlpp::DB_Info *info = get_DB_Info(name);
-    if (!conn->connect(info))
+    if (!info) return 0;
+
+    mysqlpp::Connection *conn = new My_Connection_Impl();
+    if (!conn->connect(info)) return 0;
 
     cmap.insert(map<string, mysqlpp::Connection *>::value_type(name, conn));
-    return 0;
+    return conn;
   }
 
   /// 最後の接続名を入手する
@@ -800,10 +932,50 @@ namespace {
   void
   Connection_Manager_Impl::close_all_connection()
   {
+    if (cmap.empty()) {
+      elog(T, "no need close connection.\n");
+      return;
+    }
+
+    elog(T, "all connection closing..\n");
     map<string,mysqlpp::Connection *>::iterator it = cmap.begin();
     for (; it != cmap.end(); it++) { it->second->disconnect(); }
+    elog(T, "all connection closed.\n");
   }
 
+  /// 接続情報の破棄
+  void
+  Connection_Manager_Impl::drop_db_parameter(const char *name)
+  {
+    map<string,mysqlpp::Connection *>::iterator fk = cmap.find(name);
+    if (fk != cmap.end()) {
+      elog("cannot drop using connection.\n");
+      return;
+    }
+
+    props->open_kvs(auth_dbname, "w");
+    string prefix(name);
+    prefix += ".mysql.";
+
+    vector<string> pkeys;
+    fetch_prefix_match_keys(prefix.c_str(), pkeys, props);
+    show_names(stdout, pkeys);
+
+    if (pkeys.empty()) {
+      elog(W, "%s: no drop target.\n", name);
+      return;
+    }
+
+    vector<string>::const_iterator it = pkeys.begin();
+    for (;it != pkeys.end(); it++) {
+      string pname(prefix);
+      props->store_value(pname.append(*it).c_str(), "");
+    }
+
+    elog(I, "%s: db paramster droped.\n", name);
+
+    props->close_kvs();
+  }
 
 };
 
@@ -861,51 +1033,19 @@ namespace mysqlpp {
 
   Cursor::~Cursor() { }
     
-  Connection::Connection() { }
+  Connection::Connection() : conn(0), last_result(0) { }
 
   Connection::~Connection() { }
 
   void Connection::free_cursor_all() { }
 
   Connection_Manager::Connection_Manager() { }
+  Connection_Manager::~Connection_Manager() { }
 
   Connection_Manager *
-  Connection_Manager::get_Connection_Manager(const char *name)
+  Connection_Manager::get_instance(const char *name)
   {
     return new Connection_Manager_Impl();
   }
 };
-
-// --------------------------------------------------------
-
-extern "C" {
-
-  /// MySQLの接続情報の登録と確認
-  int cmd_my_account(int argc, char **argv) {
-    puts("cmd_my_account not implemented yet.");
-    return 0;
-  }
-
-  /// MySQLの基本操作
-  int cmd_my_query(int argc, char **argv) {
-    puts("cmd_my_query not implemented yet.");
-    return 0;
-  }
-
-};
-
-// --------------------------------------------------------------------------------
-
-
-#ifdef USE_SUBCMD
-#include "subcmd.h"
-
-subcmd mysql_cmap[] = {
-  { "mysql-account", cmd_my_account, },
-  { "mysql-query", cmd_my_query, },
-  { 0 },
-};
-
-#endif
-
 

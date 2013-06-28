@@ -68,7 +68,7 @@ namespace mysqlpp {
 
   public:
     Cursor(MYSQL_STMT *stmt, Connection *conn) 
-      : cur(stmt), ref(conn), truncated(false) { }
+      : cur(stmt), ref(conn), truncated(false), verbose(false) { }
 
     virtual ~Cursor() = 0;
     /// このカーソルと連携するコネクションを得る
@@ -129,7 +129,7 @@ namespace mysqlpp {
 
   public:
     Connection();
-    virtual ~Connection() = 0;
+    virtual ~Connection();
 
     /// 接続情報を渡してDB接続を行う
     virtual bool connect(DB_Info *info) = 0;
@@ -148,7 +148,7 @@ namespace mysqlpp {
     /// DBを選択する
     virtual bool select_db(const char *dbname) = 0;
     /// （接続ユーザが操作可能な）DB名一覧を入手する
-    virtual void get_db_names(std::vector<std::string> &name_list) = 0;
+    virtual void fetch_db_names(std::vector<std::string> &name_list, const char *tbl = "%") = 0;
     /// 現在の接続のためのデフォルト文字セットをセットする
     virtual void set_character_set(const char *names) = 0;
     /// トランザクション・モードを切り替える
@@ -158,7 +158,7 @@ namespace mysqlpp {
     /// トランザクションをロールバックする
     virtual void rollback() = 0;
     /// SQLステートメントの中に使うことができる文字列に変換する
-    virtual void escape_string(std::string &buf, std::string &text) = 0;
+    virtual std::string &escape_string(std::string &buf, std::string &text) = 0;
     /// 前回実行された SQL ステートメントの実行中に発生した警告数を返す
     virtual int warning_count() = 0;
     /// テーブル名を入手する
@@ -190,20 +190,24 @@ namespace mysqlpp {
   /// 接続情報を取りまとめる
   class Connection_Manager {
   public:
-    static Connection_Manager *get_Connection_Manager(const char *name = "");
+    static Connection_Manager *get_instance(const char *name = "");
 
     /// 登録済み接続名の入手
     virtual void get_db_names(std::vector<std::string> &name_list) = 0;
     /// 接続情報の保存
     virtual void store_db_parameter(const char *name, const std::map<std::string,std::string> &params) = 0;
     /// 接続情報の入手
-    virtual void fetch_db_parameter(const char *name, std::map<std::string,std::string> &params) = 0;
+    virtual bool fetch_db_parameter(const char *name, std::map<std::string,std::string> &params) = 0;
     /// 接続済みのDB接続を得る
     virtual Connection *get_Connection(const char *name = 0) = 0;
     /// 最後の接続名を入手する
     virtual const char *get_last_connection() = 0;
     /// 管理下にある全ての接続を閉じる
     virtual void close_all_connection() = 0;
+    /// 接続情報の破棄
+    virtual void drop_db_parameter(const char *name) = 0;
+
+    virtual ~Connection_Manager();
 
   protected:
     Connection_Manager();
