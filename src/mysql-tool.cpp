@@ -101,7 +101,6 @@ namespace {
    */
   class StoreTable_CSV_Reader : public DumpCSVReader {
     string ctrl_file;
-
     /// 取り込み対象とするCSVカラム位置リストが格納される
     vector<int> poslist;
 
@@ -116,10 +115,11 @@ namespace {
 			    const vector<string> &cnames, 
 			    const map<string, int> &column_map);
   public:
-    int counter, max_records;
+    int counter, max_records, commit_records;
 
     StoreTable_CSV_Reader(const char *fname, mysqlpp::Connection *port)
-      : DumpCSVReader(""), ctrl_file(fname), conn(port), counter(0), max_records(200000) { }
+      : DumpCSVReader(""), ctrl_file(fname), conn(port), counter(0), 
+	max_records(200000), commit_records(1000) { }
 
     bool begin_read_csv();
     int read_csv(const char **row, int columns);
@@ -316,7 +316,7 @@ namespace {
       params[i].buffer_length = len;
     }
 
-    if (counter % 2000 == 0) {
+    if (counter % commit_records == 0) {
       conn->commit();
       putc('.', stderr);
     }
@@ -546,12 +546,43 @@ extern "C" {
   static int
   cmd_csv02(int argc, char **argv)
   {
-    auto_ptr<mysqlpp::Connection_Manager> cm(mysqlpp::Connection_Manager::get_instance());
+    /// 郵政省のデータベースを読み込む
+    const char *csv_file = getenv("KEN_ALL");
+    if (!csv_file) csv_file = "work/KEN_ALL-utf8.csv";
+
+    /// カラム名の対応
+    /// ファイル名がテーブル名として利用される。
+    const char *column_file = getenv("COLS");
+    if (!column_file) column_file = "work/wdzip03e.cols";
+    
+    const char *encoding = "utf8";
+    int opt;
+    int cr = 1000;
+
+    while ((opt = getopt(argc,argv,"c:E:f:r:")) != -1) {
+      switch(opt) { 
+      case 'c': column_file = optarg; break;
+      case 'E': encoding = optarg; break;
+      case 'f': csv_file = optarg; break;
+      case 'r':
+	if (sscanf(optarg,"%i",&cr) != 1)
+	  elog(I,"commit recored not changed: %s\n",optarg);
+	  break;
+      case '?': usage_my_report(argv[0]); return 1;
+      }
+    }
 
     if (optind == argc) {
       puts("usage");
       return EXIT_FAILURE;
     }
+
+    elog(I,"commit recored change: %d\n",cr);
+    elog(I,"column file: %s\n",column_file);
+    elog(I,"csv file: %s\n",csv_file);
+
+    auto_ptr<mysqlpp::Connection_Manager> 
+      cm(mysqlpp::Connection_Manager::get_instance());
 
     const char *alias = argv[optind];
 
@@ -561,18 +592,14 @@ extern "C" {
       return EXIT_FAILURE;
     }
 
-    conn->set_character_set("utf8");
+    conn->set_character_set(encoding);
 
-    /// 郵政省のデータベースを読み込む
-    const char *csv_file = getenv("KEN_ALL");
-    if (!csv_file) csv_file = "work/KEN_ALL-utf8.csv";
+    StoreTable_CSV_Reader *reader = 
+      new StoreTable_CSV_Reader(column_file, conn);
 
-    /// カラム名の対応
-    /// ファイル名がテーブル名として利用される。
-    const char *column_file = getenv("COLS");
-    if (!column_file) column_file = "work/wdzip03e.cols";
+    reader->commit_records = cr;
 
-    load_csv(csv_file, new StoreTable_CSV_Reader(column_file, conn));
+    load_csv(csv_file, reader);
 
     return EXIT_SUCCESS;
   }

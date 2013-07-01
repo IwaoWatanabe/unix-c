@@ -187,6 +187,11 @@ namespace {
 
   /// 値の登録
   bool KVS_BDB_Impl::store_value(const char *key, const char *value) {
+    if (!db) {
+      elog(W, "bdb %s not opened when sotre %s\n", db_name.c_str(), key);
+      return false;
+    }
+
     DBT dbkey = DBT_ZERO, dbdata = DBT_ZERO;
     dbkey.data = (char *)key;
     dbkey.size = strlen(key);

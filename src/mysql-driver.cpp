@@ -617,8 +617,10 @@ namespace {
   {
     if (!conn) return;
     my_bool rc = mysql_autocommit(conn, flag ? 0 : 1);
-    if (rc)
-      elog(W, "rollbacl failed.:(%u):%s\n", mysql_errno(conn), mysql_error(conn));
+    if (rc != 0)
+      elog(W, "set_autocommit failed.:(%u):%s\n", mysql_errno(conn), mysql_error(conn));
+    else
+      elog(T, "autocommit mode changed: %s\n", flag ? "true" : "false");
   }
 
   void
