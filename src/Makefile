@@ -1,5 +1,6 @@
 
 CXXFLAGS = -g -fexceptions
+CXXFLAGS += -fPIC
 CXXFLAGS += -pthread -D_REENTRANT -DUSE_SUBCMD
 LDFLAGS= -lstdc++ 
 ALL_MODULE =hello cat01
@@ -67,8 +68,10 @@ APP03_OBJS = app03.o subcmd.o
 APP03_OBJS += term.o
 app03: $(APP03_OBJS)
 
-APP04_OBJS = app04.o temp.o
+APP04_OBJS = app04.o
+APP04_OBJS += temp.o
 LIBUC_OBJS = subcmd.o 
+LIBUC_OBJS += datetime.o
 LIBUC_OBJS += times.o logger.o ini.o datetime.o
 LIBUC_OBJS += csv-util.o csv-tool.o 
 LIBUC_OBJS += file-op.o lineread.o mbs.o

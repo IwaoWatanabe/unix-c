@@ -1,5 +1,5 @@
-#ifndef __datetime_h
-#define __datetime_h
+#ifndef __datetime_hpp
+#define __datetime_hpp
 
 #include <cstdio>
 #include <ctime>
@@ -8,7 +8,7 @@
 
 namespace uc {
 
-  /// 秒制度の日時操作を行うクラス
+  /// 秒精度の日時操作を行うクラス
   /**
     注意：生成されるテキストはロケールの設定に従う
    */

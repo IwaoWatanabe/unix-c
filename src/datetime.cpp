@@ -31,8 +31,8 @@ namespace uc {
   }
 
   Date &Date::now() {
-    if (time(&sec) == (time_t)-1) perror("time");
-    else if (!::localtime_r(&sec, &tbuf)) perror("localtime_r");
+    if (time(&sec) == (time_t)-1) perror("ERROR: time");
+    else if (!::localtime_r(&sec, &tbuf)) perror("ERROR: localtime_r");
     return *this;
   }
 
@@ -57,8 +57,8 @@ namespace uc {
       tbuf.tm_mon = m - 1;
       tbuf.tm_mday = d;
     }
-    if ((sec = mktime(&tbuf)) == (time_t)-1) perror("mktime");
-    else if (!::localtime_r(&sec, &tbuf)) perror("localtime_r");
+    if ((sec = mktime(&tbuf)) == (time_t)-1) perror("ERROR: mktime");
+    else if (!::localtime_r(&sec, &tbuf)) perror("ERROR: localtime_r");
   }
 
   bool Date::set_date(int y,int m, int d, bool hold_time_part) {
@@ -166,7 +166,30 @@ namespace {
 
 // --------------------------------------------------------------------------------
 
+/// uc::Date の基本機能の確認
 static int date_sample01(int argc, char **argv) {
+  uc::Date dd;
+
+  if (argc > 1) dd.set_utime(atol(argv[1])); else dd.now();
+  /*
+    パラメータを受け取ったら、それをutime として設定する。
+    そうでなければ、現在時刻を設定する。
+  */
+
+  printf("%04d-%02d-%02d %02d:%02d:%02d\n", 
+	 dd.year(), dd.month(), dd.day(), dd.hour(), dd.minute(), dd.second());
+  /*
+    年月日、時分秒を表示する。
+  */
+
+  printf("utime %lu\n", dd.get_utime());
+  /*
+    utime を表示する。
+  */
+  return 0;
+}
+
+static int date_sample02(int argc, char **argv) {
   testapp1 aa;
   return aa.run(argc,argv);
 }
@@ -177,6 +200,7 @@ static int date_sample01(int argc, char **argv) {
 
 subcmd date_cmap[] = {
   { "date01", date_sample01, },
+  { "date02", date_sample02, },
   { 0 },
 };
 

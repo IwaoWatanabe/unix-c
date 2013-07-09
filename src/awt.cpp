@@ -10,6 +10,7 @@
 #include <time.h>
 #include <vector>
 #include <map>
+#include <typeinfo>
 
 #include <X11/StringDefs.h>
 #include <X11/Shell.h>
@@ -39,6 +40,8 @@
 #include <X11/Xmu/Editres.h>
 
 #include "xt-proc.h"
+#include "elog.hpp"
+
 #include "SmeCascade.h"
 
 using namespace std;
@@ -54,12 +57,17 @@ namespace xwin {
   extern String *as_String_array(vector<string> &entries);
 };
 
+extern "C" {
+  extern char *trim(char *t);
+  extern char *demangle(const char *demangle);
+};
+
 namespace {
 
   /// トップレベル・ウィンドウだけ表示する
   static int onlytop(int argc, char **argv) {
 
-    static String app_class = "OnlyTop", 
+    static String app_class = "OnlyTop",
       fallback_resouces[] = { "*geometry: 120x100", 0, };
     /*
       fallbackのアドレスは、スタック上に作成してはいけないため、
@@ -84,8 +92,299 @@ namespace {
 
 // --------------------------------------------------------------------------------
 
+/// Xで動作するGUIアプリケーション作成をサポートする
+
+namespace xwin {
+
+  class Client_Context;
+
+  /// 基本メニュー項目を定義する構造体
+  struct Menu_Item {
+    /// メニュー名
+    const char *name;
+    /// メニュー固有データへのポインタ
+    XtPointer client_data;
+    /// メニュー管理主体（通常は Frame）へのポインタ
+    XtPointer call_data;
+    /// サブメニュー項目
+    struct Menu_Item *sub_menu;
+     /// メニューの簡易説明テキスト
+    const char *description;
+  };
+
+  /// GUIアプリケーション・コードが作成するインタフェース
+  struct Frame {
+    virtual ~Frame() = 0;
+    /// コンテナ・リソースを参照するためのコンテキストが渡されてくる
+    virtual void set_Client_Context(Client_Context *context) { }
+    /// アプリケーションのタイトルを返す
+    virtual std::string get_title() { return ""; }
+    /// 実装クラスはこのタイミングでコンテンツを作る
+    virtual Widget create_contents(Widget parent) { return 0; }
+    /// 基本メニュー・アイテムを返す
+    virtual Menu_Item *get_menu_itmes() { return 0; }
+    /// リソースを開放する要求で呼び出される
+    virtual void release() { }
+  };
+
+  /// Frameインスタンスを生成するクラス
+  struct Frame_Factory {
+    Frame_Factory();
+    virtual ~Frame_Factory() { }
+    /// フレームのインスタンスを入手する
+    virtual Frame *get_instance() = 0;
+    /// アプリケーション・クラス名を入手する
+    virtual const char *get_class_name() { return 0; }
+    /// バージョン情報を入手する
+    virtual const char *get_version() { return "0.1"; }
+  };
+
+  /// Xサーバに関連するリソースを保持、管理する
+  /**
+     アトム、フォント、XIM関連を操作することになる
+   */
+  class Server_Resource {
+  protected:
+    /// このリソースを利用するウィジェット
+    Widget owner;
+  public:
+    // 良く利用するアトム
+    Atom WM_PROTOCOLS      /// WMとの通信用
+      ,WM_DELETE_WINDOW  /// トップレベルウインドウの破棄
+      ,COMPOUND_TEXT;   ///< 複合エンコーディングテキスト
+
+    Server_Resource(Widget owner);
+
+    virtual ~Server_Resource() = 0;
+    /// アトム値を入手する
+    virtual Atom atom_value_of(const char *name) = 0;
+    /// アトム・テキストを入手する
+    virtual std::string text_of(Atom atom) = 0;
+    /// 同じサーバを参照するリソースを探す
+    static Server_Resource *find_Server_Resource(Widget shell);
+  };
+
+  /// コンテナのリソースにアクセスするためのインタフェース
+  class Client_Context {
+    virtual ~Client_Context() = 0;
+    /// サーバ情報を入手する
+    virtual Server_Resource *get_Server_Resource() = 0;
+    /// フレームを閉じる操作のためのメニュー項目を返す
+    virtual const Menu_Item *get_close_item() = 0;
+    /// フレームを探す。無ければ作成する
+    virtual Frame *find_Frame(const char *name, const char *frame_class) = 0;
+    /// ダイアログを探す。無ければ作成する
+    virtual Frame *find_Dialog(const char *name, const char *frame_class) = 0;
+  };
+
+};
+
+// --------------------------------------------------------------------------------
+
 namespace {
 
+  using namespace xwin;
+
+  /// 空フレームだけのアプリ
+  class Simple_Frame : public Frame { };
+
+  /// 空フレームの生成クラス
+  class Simple_Frame_Factory : Frame_Factory {
+    Frame *get_instance() { return new Simple_Frame(); }
+  };
+};
+
+// --------------------------------------------------------------------------------
+
+namespace xwin {
+
+  Frame::~Frame() { }
+
+  /// 一連のファクトリを記録する
+  static vector<Frame_Factory *> frame_factories;
+
+  Frame_Factory::Frame_Factory() { frame_factories.push_back(this); }
+
+  Server_Resource::Server_Resource(Widget shell)
+    : owner(shell), WM_PROTOCOLS(0), WM_DELETE_WINDOW(0), COMPOUND_TEXT(0) { }
+
+
+  Server_Resource::~Server_Resource() { }
+};
+
+namespace {
+
+  enum Error_Level { F, E, W, N, I, A, D, T };
+
+/// トップレベル・ウィンドウを管理する
+  class Frame_Manager {
+  protected:
+    Server_Resource *resource;
+  };
+
+  /// サーバリソース管理の実装クラス
+  class Server_Resource_Impl : public Server_Resource {
+  public:
+    Server_Resource_Impl(Widget owner);
+    ~Server_Resource_Impl();
+
+    Atom atom_value_of(const char *name);
+    std::string text_of(Atom atom);
+
+    void open_frame(Frame *frame);
+
+    static void dispose_handler(Widget widget, XtPointer closure,
+				XEvent *event, Boolean *continue_to_dispatch);
+
+    static void delete_frame_proc( Widget widget, XtPointer client_data, XtPointer call_data);
+  };
+
+  Server_Resource_Impl::Server_Resource_Impl(Widget shell)
+    : Server_Resource(shell)
+  {
+    WM_PROTOCOLS = atom_value_of("WM_PROTOCOLS");
+    WM_DELETE_WINDOW = atom_value_of("WM_DELETE_WINDOW");
+    COMPOUND_TEXT = atom_value_of("COMPOUND_TEXT");
+  }
+
+  Server_Resource_Impl::~Server_Resource_Impl() { }
+
+  Atom Server_Resource_Impl::atom_value_of(const char *name) {
+    return XInternAtom(XtDisplay(owner), name, True);
+  }
+
+  string Server_Resource_Impl::text_of(Atom atom) {
+    return XGetAtomName(XtDisplay(owner), atom);
+  }
+
+  void Server_Resource_Impl::open_frame(Frame *frame) {
+    frame->create_contents(owner);
+    XtRealizeWidget(owner);
+
+    XtAddEventHandler(owner, NoEventMask, True, dispose_handler, this);
+
+    XSetWMProtocols(XtDisplay(owner), XtWindow(owner), &WM_DELETE_WINDOW, 1 );
+    /*
+      DELETEメッセージを送信してもらうように
+      ウィンドウ・マネージャに依頼している
+     */
+
+    XtAddCallback(owner, XtNdestroyCallback, delete_frame_proc, frame);
+  }
+
+  /// WMからウインドウを閉じる指令を受け取った時の処理
+  void Server_Resource_Impl::dispose_handler(Widget widget, XtPointer closure,
+			      XEvent *event, Boolean *continue_to_dispatch) {
+
+    Server_Resource *sr = (Server_Resource *)closure;
+    switch(event->type) {
+    default: return;
+    case ClientMessage:
+      if (event->xclient.message_type == sr->WM_PROTOCOLS &&
+	  event->xclient.format == 32 &&
+	  (Atom)*event->xclient.data.l == sr->WM_DELETE_WINDOW) {
+	dispose_shell(widget);
+      }
+    }
+  }
+
+  /// フレーム・インスタンスの破棄
+  void Server_Resource_Impl::delete_frame_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Frame *fr = (Frame *)client_data;
+    if (fr) fr->release();
+    cerr << "TRACE: frame deleteing.. " << fr << endl;
+    delete fr;
+  }
+
+  /// トップレベル・シェルの破棄する
+  static void quit_application(Widget widget, XtPointer client_data, XtPointer call_data) {
+    dispose_shell(widget);
+    cerr << "TRACE: quit application called." << endl;
+  }
+
+  // --------------------------------------------------------------------------------
+
+  /// ボタン一つだけ配置したフレーム
+  class Button_Frame : public Frame {
+
+    Widget create_contents(Widget shell) {
+      Widget panel =
+	XtVaCreateManagedWidget("panel", boxWidgetClass, shell, NULL);
+      Widget close =
+	XtVaCreateManagedWidget("close", commandWidgetClass, panel, NULL);
+
+      XtAddCallback(close, XtNcallback, quit_application, 0);
+      XtInstallAccelerators(panel, close);
+      /*
+	close のアクセラレータをpanelにも適応する
+      */
+      return 0;
+    }
+  };
+
+  /// ボタン・フレームの生成クラス
+  class Button_Frame_Factory : Frame_Factory {
+    Frame *get_instance() { return new Button_Frame(); }
+  };
+
+  // --------------------------------------------------------------------------------
+
+  /// Athena Widget Set を使うアプリケーションコンテナの利用開始
+  static int awt_app01(int argc, char **argv) {
+
+    Button_Frame_Factory aa02;
+    Simple_Frame_Factory aa01;
+
+    static String fallback_resouces[] = {
+      "*geometry: 300x200",
+      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "*.close.accelerators: #override "
+      " Ctrl<KeyPress>w: set() notify() unset()\\n",
+      0,
+    };
+
+    XtAppContext context;
+    static XrmOptionDescRec options[] = {};
+    Widget top_level_shell;
+
+    XtSetLanguageProc(NULL, NULL, NULL);
+
+    vector<Frame_Factory *>::iterator it = frame_factories.begin();
+    for (; it != frame_factories.end(); it++) {
+      const char *app_class = (*it)->get_class_name();
+      if (!app_class) {
+	const char *name = demangle(typeid(**it).name());
+	const char *p;
+	while ((p = strstr(name,"::"))) { name = p + 2; }
+	app_class = name;
+      }
+
+      /// 取りあえずファクトリ名とバージョンを表示してみる
+      printf("factory: %s: %s\n", app_class, (*it)->get_version());
+
+      top_level_shell =
+	XtVaAppInitialize(&context, app_class, options, XtNumber(options),
+			  &argc, argv, fallback_resouces, NULL);
+
+      Frame *fr = (*it)->get_instance();
+      printf("frame: %p: %s\n", fr, demangle(typeid(*fr).name()));
+
+      Server_Resource_Impl *sr = new Server_Resource_Impl(top_level_shell);
+      sr->open_frame(fr) ;
+      break;
+    }
+
+    elog(I, "%d factories declared.\n", frame_factories.size());
+
+    XtAppMainLoop(context);
+    XtDestroyApplicationContext(context);
+    cerr << "TRACE: context destroyed." << endl;
+
+    return 0;
+  }
+
+  // --------------------------------------------------------------------------------
+  
   static Atom WM_PROTOCOLS, WM_DELETE_WINDOW, COMPOUND_TEXT, MULTIPLE;
 
   /// アトムを入手する
@@ -104,12 +403,6 @@ namespace {
       *i->atom_ptr = XInternAtom(display, i->name, True );
   }
 
-  /// トップレベル・シェルの破棄する
-  static void quit_application(Widget widget, XtPointer client_data, XtPointer call_data) {
-    dispose_shell(widget);
-    cerr << "TRACE: quit application called." << endl;
-  }
-  
   /// WMからウインドウを閉じる指令を受け取った時の処理
   static void dispose_handler(Widget widget, XtPointer closure,
 			      XEvent *event, Boolean *continue_to_dispatch) {
@@ -1518,6 +1811,7 @@ subcmd awt_cmap[] = {
   { "tree", awt_class_tree, },
   { "list", awt_list, },
   { "edit", awt_editor, },
+  { "awt", awt_app01, },
   { 0 },
 };
 
