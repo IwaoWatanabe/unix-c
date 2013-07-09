@@ -101,11 +101,11 @@ namespace xwin {
   /// 基本メニュー項目を定義する構造体
   struct Menu_Item {
     /// メニュー名
-    const char *name;
+    String name;
     /// メニュー固有データへのポインタ
-    XtPointer client_data;
+    XtCallbackProc proc;
     /// メニュー管理主体（通常は Frame）へのポインタ
-    XtPointer call_data;
+    XtPointer closure;
     /// サブメニュー項目
     struct Menu_Item *sub_menu;
      /// メニューの簡易説明テキスト
@@ -302,6 +302,115 @@ namespace {
     cerr << "TRACE: quit application called." << endl;
   }
 
+  /// パラメータにキーが含まれているか診断する
+  static bool param_contains(String name, String *params, Cardinal num) {
+    if (name == NULL || strcasecmp(name,"") == 0 || num == 0) return false;
+    for (Cardinal n = 0; n < num; n++) {
+      if (strcasecmp(name, params[n]) == 0) return true;
+    }
+    return false;
+  }
+
+  /// リスト項目で次のエントリに移動するアクション
+  /**
+   * パラメータとして有効なのは next, previous, above, below
+   * それ以外のパラメータが渡ってきた場合は無視する
+   */
+  static void change_item_action(Widget list, XEvent *event, String *params, Cardinal *num) {
+    XawListReturnStruct *rs = XawListShowCurrent(list);
+
+    int numberStrings, columns;
+    Boolean isVertical;
+
+    XtVaGetValues(list, XtNnumberStrings, &numberStrings,
+		  XtNdefaultColumns, &columns,
+		  XtNverticalList, &isVertical,
+		  NULL );
+
+    columns = getXawListColumns(list);
+
+#if 0
+    cerr << "TRACE: " << numberStrings << " items." << endl;
+    cerr << "TRACE: index: " << rs->list_index << " "
+	 << "columns: " << columns << " "
+	 << "vertical: " << isVertical << endl;
+#endif
+
+    if (num == 0 || param_contains("next",params,*num)) {
+      if (rs->list_index + 1 < numberStrings)
+	XawListHighlight(list, ++rs->list_index);
+    }
+    else if (param_contains("previous",params,*num)) {
+      if (rs->list_index > 0)
+	XawListHighlight(list, --rs->list_index);
+    }
+    else if (param_contains("below",params,*num)) {
+      if (rs->list_index + columns < numberStrings)
+	XawListHighlight(list, rs->list_index += columns);
+    }
+    else if (param_contains("above",params,*num)) {
+      if (rs->list_index >= columns)
+	XawListHighlight(list, rs->list_index -= columns);
+    }
+    else {
+      cerr << "WARN: unnkown no operation" << endl;
+      return;
+    }
+
+    rs = XawListShowCurrent(list);
+    XtCallCallbacks(list, XtNcallback, (XtPointer)rs);
+  }
+
+  static void menu_popup_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " popup" << endl;
+  }
+
+  static void menu_popdown_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " popdown" << endl;
+  }
+
+  // ウィジェットの名前を元にメニューを探す
+  static Widget find_menu(Widget widget, String name) {
+    Widget w, menu;
+
+    for (w = widget; w != NULL; w = XtParent(w))
+      if ((menu = XtNameToWidget(w, name)) != NULL) return menu;
+    return NULL;
+  }
+
+  /** AWのポップアップメニューを作成する
+   */
+  static Widget create_popup_menu(String menu_name, Widget shell, Menu_Item *items) {
+
+    Widget menu =
+      XtVaCreatePopupShell( menu_name, simpleMenuWidgetClass, shell, NULL );
+
+    XtAddCallback(menu, XtNpopupCallback, menu_popup_proc, 0);
+    XtAddCallback(menu, XtNpopdownCallback, menu_popdown_proc, 0);
+
+    Widget item;
+
+    for (int i = 0; items[i].name; i++) {
+      if (strcmp("-", items[i].name) == 0) {
+	XtVaCreateManagedWidget("-", smeLineObjectClass, menu, NULL );
+	continue;
+      }
+
+      if (items[i].sub_menu) {
+	Widget sub = create_popup_menu(items[i].name, shell, items[i].sub_menu);
+	item = XtVaCreateManagedWidget(items[i].name, smeCascadeObjectClass, menu,
+				       XtNsubMenu, sub, NULL );
+	continue;
+      }
+
+      item = XtVaCreateManagedWidget(items[i].name, smeBSBObjectClass, menu, NULL );
+      if (items[i].proc)
+	XtAddCallback(item, XtNcallback, items[i].proc, items[i].closure);
+    }
+    return menu;
+  }
+
+
   // --------------------------------------------------------------------------------
 
   /// ボタン一つだけ配置したフレーム
@@ -329,17 +438,786 @@ namespace {
 
   // --------------------------------------------------------------------------------
 
+  /// AWのクラスの継承ツリーを出力する
+  class Class_Tree : public Frame {
+    /// クラス名とそれを表示するウィジェットの組を保持する
+    map<string, Widget> nodes;
+    Widget find_node(WidgetClass wc);
+    Widget add_node(WidgetClass wc, Widget tree);
+
+  public:
+    Widget create_contents(Widget shell);
+  };
+
+  class Class_Tree_Factory : Frame_Factory {
+    Frame *get_instance() { return new Class_Tree(); }
+  };
+
+  /// クラスに対応するwidgetを入手する
+  Widget Class_Tree::find_node(WidgetClass wc) {
+    const char *cn = getXtClassName(wc);
+    map<string, Widget>::iterator it = nodes.find(cn);
+    // クラス名でウィジェットを引き出す
+    if (it == nodes.end()) return None;
+    return (*it).second;
+  }
+
+  /// クラスに対応するwidgetを追加する
+  Widget Class_Tree::add_node(WidgetClass wc, Widget tree) {
+    if (!wc) return None;
+
+    Widget t = find_node(wc);
+    if (t) return t;
+
+    const char *cn = getXtClassName(wc);
+    WidgetClass superClass = getXtSuperClass(wc);
+    if (!superClass) {
+      // トップレベルのノード
+      Widget re =
+	XtVaCreateManagedWidget(cn, commandWidgetClass, tree,
+				XtNlabel, XtNewString(cn), NULL);
+      nodes[cn] = re;
+      return re;
+    }
+
+    Widget parent = find_node(superClass);
+    if (parent == None) parent = add_node(superClass, tree);
+
+    Widget re =
+      XtVaCreateManagedWidget(cn, commandWidgetClass, tree,
+			      XtNtreeParent, parent,
+			      XtNlabel, XtNewString(cn), NULL);
+    nodes[cn] = re;
+    return re;
+  }
+
+  /// pannaer が操作されたタイミングで portholeのウィジェットの位置を変えるためのコールバック
+  static void panner_callback (Widget panner,XtPointer closure,XtPointer data) {
+    XawPannerReport *rep = (XawPannerReport *)data;
+    Widget target = (Widget)closure;
+    Arg args[2];
+    if (!target) return;
+    XtSetArg (args[0], XtNx, -rep->slider_x);
+    XtSetArg (args[1], XtNy, -rep->slider_y);
+    XtSetValues (target, args, 2);
+  }
+
+  /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
+  static void porthole_callback(Widget porthole, XtPointer closure, XtPointer data) {
+    Widget panner = (Widget) closure;
+    XawPannerReport *rep = (XawPannerReport *)data;
+    Arg args[6];
+    Cardinal n = 2;
+
+    XtSetArg (args[0], XtNsliderX, rep->slider_x);
+    XtSetArg (args[1], XtNsliderY, rep->slider_y);
+
+    if (rep->changed != (XawPRSliderX | XawPRSliderY)) {
+      XtSetArg (args[2], XtNsliderWidth, rep->slider_width);
+      XtSetArg (args[3], XtNsliderHeight, rep->slider_height);
+      XtSetArg (args[4], XtNcanvasWidth, rep->canvas_width);
+      XtSetArg (args[5], XtNcanvasHeight, rep->canvas_height);
+      n = 6;
+    }
+    XtSetValues(panner, args, n);
+  }
+
+
+  Widget Class_Tree::create_contents(Widget top) {
+
+    Widget form =
+      XtVaCreateManagedWidget("form",formWidgetClass, top, NULL);
+
+    Widget panner =
+      XtVaCreateManagedWidget("panner", pannerWidgetClass, form, NULL);
+
+    Widget porthole =
+      XtVaCreateManagedWidget("porthole",portholeWidgetClass, form,
+			      XtNbackgroundPixmap, None, NULL);
+    Widget tree =
+      XtVaCreateManagedWidget("tree", treeWidgetClass, porthole, NULL);
+
+    XtAddCallback(porthole, XtNreportCallback, porthole_callback, panner);
+    XtAddCallback(panner, XtNreportCallback, panner_callback, tree);
+
+    WidgetClass awclasses[] = {
+      applicationShellWidgetClass,
+      asciiSinkObjectClass,
+      asciiSrcObjectClass,
+      asciiTextWidgetClass,
+      boxWidgetClass,
+      commandWidgetClass,
+      dialogWidgetClass,
+      labelWidgetClass,
+      listWidgetClass,
+      menuButtonWidgetClass,
+      panedWidgetClass,
+      pannerWidgetClass,
+      portholeWidgetClass,
+      repeaterWidgetClass,
+      scrollbarWidgetClass,
+      stripChartWidgetClass,
+      toggleWidgetClass,
+      treeWidgetClass,
+      multiSinkObjectClass,
+      multiSrcObjectClass,
+      smeBSBObjectClass,
+      smeLineObjectClass,
+      sessionShellWidgetClass,
+      viewportWidgetClass,
+      simpleMenuWidgetClass,
+      NULL,
+    }, *wc = awclasses;
+
+    while (*wc) {
+      add_node(*wc++, tree);
+    }
+
+    XtRealizeWidget(top);
+
+    Dimension canvas_width, canvas_height, slider_width, slider_height;
+    XtVaGetValues(tree,
+		  XtNwidth, &canvas_width,
+		  XtNheight, &canvas_height,
+		  NULL);
+
+    XtVaGetValues(porthole,
+		  XtNwidth, &slider_width,
+		  XtNheight, &slider_height,
+		  NULL);
+
+    XtVaSetValues(panner,
+		  XtNcanvasWidth, &canvas_width,
+		  XtNcanvasHeight, &canvas_height,
+		  XtNsliderWidth, &slider_width,
+		  XtNsliderHeight, &slider_height,
+		  NULL);
+
+    XRaiseWindow (XtDisplay(panner), XtWindow(panner));
+
+    return 0;
+  }
+
+  // --------------------------------------------------------------------------------
+
+  /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
+  static void viewport_callback(Widget porthole, XtPointer closure, XtPointer data) {
+    XawPannerReport *rep = (XawPannerReport *)data;
+
+    cerr << "TRACE: y:" << rep->slider_y << " x:" << rep->slider_x
+	 << " slider width:" << rep->slider_width << " height:" << rep->slider_height
+	 << " canvas width:" << rep->canvas_width << " height:" << rep->canvas_height
+	 << " changed:" << rep->changed << endl;
+  }
+
+  /// メニューアイテムを選択した時の処理
+  static void menu_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " selected." << endl;
+  }
+
+  /// AWのクラスの継承ツリーを出力する
+  class Folder_List : public Frame {
+    Widget list;
+    vector<string> entries;
+
+    XawListReturnStruct last_selected;
+    XtIntervalId timer;
+    long interval; // ms
+
+    static void item_selected_timer(XtPointer closure, XtIntervalId *id);
+    static void item_selected( Widget widget, XtPointer client_data, XtPointer call_data);
+
+  public:
+    Folder_List() : list(0), timer(0), interval(400) { }
+    Widget create_contents(Widget shell);
+  };
+
+  class Folder_List_Factory : Frame_Factory {
+    Frame *get_instance() { return new Folder_List(); }
+  };
+
+  /// リストアイテムを選択した時の処理
+  void Folder_List::item_selected_timer(XtPointer closure, XtIntervalId *id) {
+    Folder_List *app = (Folder_List *)closure;
+    app->timer = 0;
+    cerr << "TRACE: item selected:" << app->last_selected.list_index
+	 << ":" << app->last_selected.string << endl;
+  }
+
+  /// リストアイテムを選択した時の処理
+  void Folder_List::item_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
+    XawListReturnStruct *rs = (XawListReturnStruct *)call_data;
+    Folder_List *app = (Folder_List *)client_data;
+
+    app->last_selected = *rs;
+    // このタイミングではタイマーを設定するだけで、主要な処理は遅延実行する
+
+    if (app->timer) XtRemoveTimeOut(app->timer);
+    app->timer =
+      XtAppAddTimeOut(XtWidgetToApplicationContext(widget),
+		      app->interval, item_selected_timer, app);
+    if (0)
+      cout << "TRACE: " << XtName(widget) << " item selected." << endl;
+  }
+
+  Widget Folder_List::create_contents(Widget top) {
+
+    xwin::load_dirent(".", entries, false);
+    String *slist = xwin::as_String_array(entries);
+
+    Widget pane =
+      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
+    Widget menu_bar =
+      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
+
+    XtVaCreateManagedWidget("list", menuButtonWidgetClass, menu_bar,
+			    XtNmenuName, "list-menu",
+			    NULL);
+
+    struct Menu_Item sub_items[] = {
+      { "sub-item1", menu_selected, },
+      { "sub-item2", menu_selected, },
+      { "sub-item3", menu_selected, },
+      { 0, },
+    };
+
+    struct Menu_Item items[] = {
+      { "item1", menu_selected, },
+      { "item2", menu_selected, },
+      { "menu-item2", menu_selected, 0, sub_items },
+      { "-", },
+      { "close", quit_application, },
+      { 0, },
+    };
+
+    create_popup_menu("list-menu", pane, items);
+
+    Widget viewport =
+      XtVaCreateManagedWidget("viewport", viewportWidgetClass, pane,
+			      XtNallowVert, True,
+			      XtNuseRight, True,
+			      NULL);
+    XtAddCallback(viewport, XtNreportCallback, viewport_callback, 0);
+    list =
+      XtVaCreateManagedWidget("list", listWidgetClass, viewport,
+			      XtNlist, (XtArgVal)slist,
+			      XtNpasteBuffer, True,
+			      //XtNdefaultColumns, (XtArgVal)1,
+			      NULL);
+    XtAddCallback(list, XtNcallback, item_selected, this);
+
+    Widget close = 
+      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
+    XtAddCallback(close, XtNcallback, quit_application, 0);
+
+    XtInstallAccelerators(list, close);
+    XtRealizeWidget(top);
+
+    // 初期状態で選択されているようにする
+    XawListHighlight(list, 0);
+
+    Widget vertical = XtNameToWidget(viewport, "vertical");
+    if (vertical) XtInstallAccelerators(list, vertical);
+
+    return 0;
+  }
+
+  // --------------------------------------------------------------------------------
+
+  /// AWのクラスの継承ツリーを出力する
+  class Editor_Frame : public Frame {
+    /// GUIパーツ
+    Widget buf, status;
+
+    /// 物理行移動のためのダイアログ
+    Widget goto_line_dialog;
+
+    /// 時刻表示のタイマー
+    XtIntervalId timer;
+    /// 時刻表示のインターバル
+    long interval; // ms
+
+    XtIntervalId position_timer;
+    long position_interval; // ms
+
+    XawTextPositionInfo save_pos;
+
+    static void show_time_proc(XtPointer closure, XtIntervalId *id);
+    static void fetch_text_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void select_all_text_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void delete_selection_text_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void append_hello_text_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void goto_line_text_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void open_goto_list_dialog_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void show_potision_proc(XtPointer closure, XtIntervalId *id);
+    static void position_callback(Widget widget, XtPointer client_data, XtPointer call_data);
+
+  public:
+    Editor_Frame() : goto_line_dialog(None),timer(0),interval(1000),
+		 position_timer(0), position_interval(600) { }
+
+    Widget create_contents(Widget shell);
+  };
+
+  class Editor_Frame_Factory : Frame_Factory {
+    Frame *get_instance() { return new Editor_Frame(); }
+  };
+
+  /// 地域時間を入手する
+  static void fetch_localtime(struct tm *local) {
+    time_t now;
+    if (time(&now) == (time_t)-1) { perror("time"); return; }
+    if (!localtime_r(&now, local)) {
+      cerr << "unkown localtime." << endl;
+    }
+  }
+
+  /// 現在時刻の表示
+  void Editor_Frame::show_time_proc(XtPointer closure, XtIntervalId *id) {
+    Editor_Frame *app = (Editor_Frame *)closure;
+
+    struct tm local;
+    fetch_localtime(&local);
+
+    char buf[200];
+    strftime(buf, sizeof buf, "%Y, %B, %d, %A %p%I:%M:%S", &local);
+    strftime(buf, sizeof buf, "%p %I:%M", &local);
+    XtVaSetValues(app->status, XtNstring, XtNewString(buf), NULL);
+
+    // 再開するために再登録
+    app->timer =
+      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
+		      app->interval, show_time_proc, app);
+  }
+
+  /// 選択された領域のテキストを入手する
+  static wstring fetch_selected_text(Widget textw) {
+    XawTextPosition begin_pos, end_pos;
+
+    XawTextGetSelectionPos(textw, &begin_pos, &end_pos);
+    if (begin_pos == end_pos) return L"";
+
+    XawTextBlock text;
+    XawTextPosition pos = XawTextSourceRead(XawTextGetSource(textw), begin_pos, &text, end_pos - begin_pos);
+
+#if 1
+    cerr << "begin:" << begin_pos << endl;
+    cerr << "end:" << end_pos << endl << endl;
+    cerr << "pos:" << pos << endl << endl;
+    cerr << "first:" << text.firstPos << endl;
+    cerr << "length:" << text.length << endl;
+    cerr << "format:" << text.format << endl;
+#endif
+
+    if (text.format == XawFmtWide) {
+      // ワイド文字で返って来るようだ
+#if 0
+      cerr << "format: wide" << endl;
+#endif
+      wstring wstr(((wchar_t *)text.ptr), text.length);
+      return wstr;
+    }
+    return L"";
+  }
+
+  /// メニューでテキスト抽出の指令を受け取った時の処理
+  void Editor_Frame::fetch_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
+
+    cout << XtName(app->buf) << " selected" << endl;
+
+    XawTextPosition begin_pos, end_pos;
+    XawTextGetSelectionPos(app->buf, &begin_pos, &end_pos);
+    if (begin_pos == end_pos) {
+      String text;
+      XtVaGetValues(app->buf, XtNstring, &text, NULL );
+      cout << text << endl << flush;
+      return;
+    }
+#if 1
+    wstring wstr = fetch_selected_text(app->buf);
+    printf("%ls\n", wstr.c_str());
+    fflush(stdout);
+#else
+    XawTextBlock text;
+    XawTextPosition pos = XawTextSourceRead(XawTextGetSource(app->buf), begin_pos, &text, end_pos - begin_pos);
+
+    cerr << "begin:" << begin_pos << endl;
+    cerr << "end:" << end_pos << endl << endl;
+    cerr << "pos:" << pos << endl << endl;
+
+    cerr << "first:" << text.firstPos << endl;
+    cerr << "length:" << text.length << endl;
+    cerr << "format:" << text.format << endl;
+
+    if (text.format == XawFmtWide) {
+      cerr << "format: wide" << endl;
+      wstring wstr(((wchar_t *)text.ptr), text.length);
+      printf("%ls\n", wstr.c_str());
+    }
+    else {
+      string mbstr(text.ptr + text.firstPos, text.length);
+      printf("%s\n", mbstr.c_str());
+    }
+#endif
+  }
+
+  /// すべてのテキストを選択(セレクションには入れない)
+  void Editor_Frame::select_all_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
+    XawTextPosition last = XawTextLastPosition(app->buf);
+    XawTextSetSelection(app->buf,0,last);
+  }
+
+  /// 選択テキストを置き換える
+  static void replace_text(Widget text, wchar_t *buf, size_t len) {
+    XawTextPosition begin_pos, end_pos;
+    XawTextGetSelectionPos(text, &begin_pos, &end_pos);
+    XawTextBlock block;
+    block.firstPos = 0;
+    block.length = len;
+    block.ptr = (char *)buf;
+    block.format = XawFmtWide;
+    int rc = XawTextReplace(text, begin_pos, end_pos, &block);
+    cerr << "TRACE: aw replace selection: " << rc << endl;
+  }
+
+  /// 選択テキストを削除する
+  void Editor_Frame::delete_selection_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
+    replace_text(app->buf, L"", 0) ;
+    cerr << "TRACE: aw delete selection: " << endl;
+  }
+
+  /// テキストを末尾に追加する
+  static void append_text(Widget text, const wchar_t *buf, size_t len) {
+    XawTextPosition last = XawTextLastPosition(text);
+    XawTextBlock block;
+    block.firstPos = 0;
+    block.length = len;
+    block.ptr = (char *)buf;
+    block.format = XawFmtWide;
+    int rc = XawTextReplace(text, last, last, &block);
+    cerr << "TRACE: aw append: " << rc << endl;
+    XawTextSetInsertionPoint(text, last + len);
+  }
+
+  /// テキストをカレット位置に追加する
+  static void insert_text(Widget text, wchar_t *buf, size_t len) {
+    XawTextPosition pos = XawTextGetInsertionPoint(text);
+    XawTextBlock block;
+    block.firstPos = 0;
+    block.length = len;
+    block.ptr = (char *)buf;
+    block.format = XawFmtWide;
+    int rc = XawTextReplace(text, pos, pos, &block);
+    cerr << "TRACE: aw insert: " << rc << endl;
+    XawTextSetInsertionPoint(text, pos + len);
+  }
+
+  ///　現在時刻をカレット位置に挿入する
+  static void insert_datetime_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget text = (Widget)client_data;
+
+    struct tm local;
+    fetch_localtime(&local);
+
+    char buf[200];
+    strftime(buf, sizeof buf, "%Y, %B, %d, %A %p%I:%M:%S", &local);
+
+    size_t len = strlen(buf);
+    wchar_t wcs[len + 1];
+    len = mbstowcs(wcs, buf, len);
+    if (len != (size_t)-1) insert_text(text, wcs, len);
+  }
+
+  void Editor_Frame::append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
+    wchar_t buf[] = L"Hello,world\n";
+    append_text(app->buf, buf, wcslen(buf));
+  }
+
+  /// ダイアログテキストを初期化する
+  static void clear_dialog_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget dialog = (Widget )client_data;
+    XtVaSetValues(dialog, XtNvalue, XtNewString(""), NULL);
+  }
+
+  /// ダイアログのボタンが押されたタイミングでポップダウンさせるためのコールバック
+  static void close_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget dialog = (Widget)client_data;
+    XtPopdown(dialog);
+  }
+
+  /// テキストの物理行移動
+  void Editor_Frame::goto_line_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
+    const char *value = XawDialogGetValueString(app->goto_line_dialog);
+
+    int lineno = atoi(value);
+    cerr << "TRACE: #goto_line_text_proc called:" << lineno << endl;
+
+    // TODO: 移動する方法を探して実装する
+  }
+
+  /// 子ウィジェットを探して、アクセラレータを登録する
+  static void install_accelerators(Widget parent, const char *name) {
+    Widget wi = XtNameToWidget(parent, name);
+    if (wi) {
+      XtAccelerators accelerators;
+      XtVaGetValues(wi, XtNaccelerators, &accelerators, NULL);
+      XtInstallAccelerators(parent, wi);
+      cerr << "TRACE: widget " << name << ":" << getXtName(wi) << endl;
+      cerr << "TRACE: accelerators: " << accelerators << endl;
+    }
+  }
+
+  /// ダイアログをウィジェット相対で表示する
+  static void popup_dialog(Widget target, Widget shell, XtGrabKind kind) {
+    Position x, y, rootx, rooty;
+    Dimension width, height;
+
+    if (!shell) return;
+
+    // ポップアップすべき位置の計算
+    XtVaGetValues(target, XtNx, &x, XtNy, &y,
+		  XtNwidth, &width, XtNheight, &height, NULL);
+
+    XtTranslateCoords(XtParent(target), x, y, &rootx, &rooty );
+
+    XtVaSetValues(shell, XtNx, rootx + width - 25,
+		XtNy, rooty + height - 25, NULL );
+    XtPopup(shell, kind);
+  }
+
+  /// テキストの物理行移動のダイアログ表示
+  void Editor_Frame::open_goto_list_dialog_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
+
+    if (!app->goto_line_dialog) {
+      Widget shell =
+	XtVaCreatePopupShell("goto-line", transientShellWidgetClass, find_shell(widget, 0), NULL );
+
+      Widget dialog = app->goto_line_dialog =
+	XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell,
+				XtNvalue, XtNewString(""), NULL );
+
+      /* ウィジット関数によってダイアログ内部のボタンをセットする */
+      XawDialogAddButton(dialog, "jump", goto_line_text_proc, app );
+      XawDialogAddButton(dialog, "clear", clear_dialog_text_proc, dialog );
+      XawDialogAddButton(dialog, "cancel", close_dialog, shell );
+
+      Widget value = XtNameToWidget(dialog, "value");
+
+      install_accelerators(dialog, "jump");
+      install_accelerators(dialog, "cancel");
+
+      install_accelerators(value, "jump");
+      install_accelerators(value, "cancel");
+
+      XtVaSetValues(dialog, XtNlabel, XtNewString("line number:"), NULL);
+    }
+
+    XtVaSetValues(app->goto_line_dialog, XtNvalue, XtNewString(""), NULL);
+
+    // モーダルダイアログ（ただし他のウィンドウとは非排他的)
+    popup_dialog(widget, find_shell(app->goto_line_dialog,0), XtGrabNonexclusive);
+  }
+
+  /// 現在カーソル位置の表示
+  void Editor_Frame::show_potision_proc(XtPointer closure, XtIntervalId *id) {
+    Editor_Frame *app = (Editor_Frame *)closure;
+    app->position_timer = 0;
+    cerr << "Line: " << app->save_pos.line_number <<
+      " Column: " << (app->save_pos.column_number + 1) << "     \r";
+  }
+
+  /// テキスト位置が変化したタイミングで呼び出される
+  void Editor_Frame::position_callback(Widget widget, XtPointer client_data, XtPointer call_data) {
+    XawTextPositionInfo *pos = (XawTextPositionInfo *)call_data;
+    Editor_Frame *app = (Editor_Frame *)client_data;
+
+    if (0)
+      cerr << XtName(widget) << " position callback" << endl;
+
+    app->save_pos = *pos;
+    if (app->position_timer)
+      XtRemoveTimeOut(app->position_timer);
+
+    app->position_timer =
+      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
+		      app->position_interval, show_potision_proc, app);
+  }
+
+  Widget Editor_Frame::create_contents(Widget top) {
+    Widget pane =
+      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
+    Widget menu_bar =
+      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
+
+    XtVaCreateManagedWidget("memo", menuButtonWidgetClass, menu_bar,
+			    XtNmenuName, "memo-menu",
+			    NULL);
+    buf =
+      XtVaCreateManagedWidget("buf", asciiTextWidgetClass, pane,
+			      XtNeditType, XawtextEdit,
+			      XtNtype, XawAsciiString,
+			      XtNwrap, XawtextWrapWord,
+			      XtNscrollVertical, XawtextScrollWhenNeeded, // or XawtextScrollAlways,
+			      NULL);
+
+    XtAddCallback(buf, XtNpositionCallback, position_callback, this);
+
+    Widget close =
+      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
+    XtAddCallback(close, XtNcallback, quit_application, 0);
+    XtInstallAccelerators(buf, close);
+
+    struct Menu_Item submenu[] = {
+      { "item1", menu_selected, },
+      { "item2", menu_selected, },
+      { "item3", menu_selected, },
+      { 0, },
+    };
+
+    //create_popup_menu("memo-submenu", top, submenu);
+
+    struct Menu_Item items[] = {
+      { "select-all", select_all_text_proc, this, },
+      { "delete-selection", delete_selection_text_proc, this, },
+      { "hello", append_hello_text_proc, this, },
+      { "fetch-text", fetch_text_proc, this, },
+      { "now", insert_datetime_text_proc, buf, },
+      { "goto-line", open_goto_list_dialog_proc, this, },
+      { "sub-menu", 0, 0, submenu },
+      { "-", },
+      { "close", quit_application, },
+      { 0, },
+    };
+
+    create_popup_menu("memo-menu", top, items);
+
+    struct Menu_Item shortcut_item[] = {
+      { "aaa", menu_selected, },
+      { "bbb", menu_selected, },
+      { "fetch-text", fetch_text_proc, this, },
+      { "sub-menu", 0, 0, submenu },
+      { "-", },
+      { "close", quit_application, },
+      { 0, },
+    };
+
+    create_popup_menu("text-shortcut", top, shortcut_item);
+
+#if 1
+    status =
+      XtVaCreateManagedWidget("status", asciiTextWidgetClass, pane,
+			      XtNscrollHorizontal, XawtextScrollNever,
+			      XtNdisplayCaret, False,
+			      XtNskipAdjust, True, NULL);
+#endif
+
+    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
+
+    return 0;
+  }
+
+
+  // --------------------------------------------------------------------------------
+
   /// Athena Widget Set を使うアプリケーションコンテナの利用開始
   static int awt_app01(int argc, char **argv) {
 
+    Editor_Frame_Factory aa05;
+    Folder_List_Factory aa04;
+    Class_Tree_Factory aa03;
     Button_Frame_Factory aa02;
     Simple_Frame_Factory aa01;
 
     static String fallback_resouces[] = {
-      "*geometry: 300x200",
+      "Simple_Frame_Factory.geometry: 300x200",
+      "Button_Frame_Factory.geometry: 300x200",
+      "Class_Tree_Factory.geometry: 800x400",
+
       "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
       "*.close.accelerators: #override "
       " Ctrl<KeyPress>w: set() notify() unset()\\n",
+
+      "*tree.gravity: west",
+
+      "*international: True",
+      "*fontSet: -*-*-*-*-*--24-*",
+      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "*List.font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+
+      "Folder_List_Factory.geometry: 800x400",
+
+      "*Viewport.vertical.accelerators: #override "
+      " Ctrl<KeyPress>Next: StartScroll(Forward) NotifyScroll(Proportional) EndScroll()\\n"
+      " Ctrl<KeyPress>Prior: StartScroll(Backward) NotifyScroll(Proportional) EndScroll()\\n"
+      " <Btn4Down>: StartScroll(Backward)\\n"
+      " <Btn5Down>: StartScroll(Forward)\\n"
+      " <BtnUp>:NotifyScroll(Proportional) EndScroll()\n",
+
+      "*Viewport.vertical.translations: #override "
+      " <Btn4Down>: StartScroll(Backward)\\n"
+      " <Btn5Down>: StartScroll(Forward)\\n",
+
+      "*List.translations: #override "
+      " Ctrl<Key>f: changeItem(next)\\n"
+      " Ctrl<Key>b: changeItem(previous)\\n"
+      " <Key>Right: changeItem(next)\\n"
+      " <Key>Left: changeItem(previous)\\n"
+      " <Key>Up: changeItem(above)\\n"
+      " <Key>Down: changeItem(below)\\n"
+      " <Btn1Down>: Set() Notify() \\n"
+      " Ctrl <Btn3Down>: XawPositionSimpleMenu(list-menu) XtMenuPopup(list-menu)\\n",
+
+
+      "*international: True",
+      "*inputMethod: kinput2",
+      "*fontSet: -*-*-*-*-*--24-*",
+      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
+      "*preeditType: OverTheSpot,OffTheSpot,Root",
+      "*cursorColor: red",
+
+      "*buf.width: 500",
+      "*buf.height: 300",
+      "*buf.textSource.enableUndo: True",
+      "*sub-menu.menuName: memo-submenu",
+
+      "*Text.translations: #override "
+      "Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
+      "Ctrl<Key>Right: forward-word()\\n"
+      "Ctrl<Key>Left: backward-word()\\n"
+      "Ctrl<Key>space: select-start()\\n"
+      "Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
+      "<Key>Home: beginning-of-file()\\n"
+      "<Key>End: end-of-file()\\n"
+      "<Key>Next: next-page()\\n"
+      "<Key>Prior: previous-page()\\n",
+
+      "*buf.translations: #override "
+      " Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
+      " Ctrl<Key>Right: forward-word()\\n"
+      " Ctrl<Key>Left: backward-word()\\n"
+      " Ctrl<Key>space: select-start()\\n"
+      " Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
+      " <Key>Home: beginning-of-file()\\n"
+      " <Key>End: end-of-file()\\n"
+      " <Key>Next: next-page()\\n"
+      " <Key>Prior: previous-page()\\n"
+      " Shift<Btn4Down>,<Btn4Up>: scroll-one-line-down()\\n"
+      " Shift<Btn5Down>,<Btn5Up>: scroll-one-line-up()\\n"
+      " Ctrl<Btn4Down>,<Btn4Up>: previous-page()\\n"
+      " Ctrl<Btn5Down>,<Btn5Up>: next-page()\\n"
+      " <Btn4Down>,<Btn4Up>:scroll-one-line-down()scroll-one-line-down()scroll-one-line-down()"
+        "scroll-one-line-down()scroll-one-line-down()\\n"
+      " <Btn5Down>,<Btn5Up>:scroll-one-line-up()scroll-one-line-up()scroll-one-line-up()"
+        "scroll-one-line-up()scroll-one-line-up()\\n"
+      " Ctrl<Key>F2: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      " Ctrl<Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      " Ctrl<Btn3Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n",
       0,
     };
 
@@ -348,6 +1226,10 @@ namespace {
     Widget top_level_shell;
 
     XtSetLanguageProc(NULL, NULL, NULL);
+
+    static XtActionsRec actions[] = {
+      { "changeItem", change_item_action, },
+    };
 
     vector<Frame_Factory *>::iterator it = frame_factories.begin();
     for (; it != frame_factories.end(); it++) {
@@ -375,6 +1257,8 @@ namespace {
     }
 
     elog(I, "%d factories declared.\n", frame_factories.size());
+
+    XtAppAddActions(context, actions, XtNumber(actions));
 
     XtAppMainLoop(context);
     XtDestroyApplicationContext(context);
@@ -612,24 +1496,6 @@ namespace {
 
 namespace {
 
-  /// ダイアログをウィジェット相対で表示する
-  static void popup_dialog(Widget target, Widget shell, XtGrabKind kind) {
-    Position x, y, rootx, rooty;
-    Dimension width, height;
-
-    if (!shell) return;
-
-    // ポップアップすべき位置の計算
-    XtVaGetValues(target, XtNx, &x, XtNy, &y, 
-		  XtNwidth, &width, XtNheight, &height, NULL);
-    
-    XtTranslateCoords(XtParent(target), x, y, &rootx, &rooty );
-
-    XtVaSetValues(shell, XtNx, rootx + width - 25,
-		XtNy, rooty + height - 25, NULL );
-    XtPopup(shell, kind);
-  }
-
   /** Commandに登録するコールバック
    * @param widget この関数を呼び出したCommandの参照
    * @param client_data コールバック登録で渡したデータ
@@ -639,12 +1505,6 @@ namespace {
     Widget shell = (Widget)client_data;
     // モーダルダイアログ（ただし他のウィンドウとは非排他的)
     popup_dialog(widget, shell, XtGrabNonexclusive);
-  }
-
-  /// ダイアログのボタンが押されたタイミングでポップダウンさせるためのコールバック
-  static void close_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
-    Widget dialog = (Widget)client_data;
-    XtPopdown(dialog);
   }
 
   /// ダイアログを表示する
@@ -675,23 +1535,11 @@ namespace {
     };
 
     XtAppContext context;
-    return 
+    return
       XtVaAppInitialize(&context, app_class, NULL, 0,
 			argc, argv, fallback_resouces, NULL);
   }
   
-  /// 子ウィジェットを探して、アクセラレータを登録する
-  static void install_accelerators(Widget parent, const char *name) {
-    Widget wi = XtNameToWidget(parent, name);
-    if (wi) {
-      XtAccelerators accelerators;
-      XtVaGetValues(wi, XtNaccelerators, &accelerators, NULL);
-      XtInstallAccelerators(parent, wi);
-      cerr << "TRACE: widget " << name << ":" << getXtName(wi) << endl;
-      cerr << "TRACE: accelerators: " << accelerators << endl;
-    }
-  }
-
   void dialog_app::create_content(Widget top, int argc, char **argv) {
     Widget shell = XtVaCreatePopupShell("confirm", transientShellWidgetClass, top, NULL );
     Widget dialog = XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, NULL );
@@ -706,7 +1554,7 @@ namespace {
     Widget press = XtVaCreateManagedWidget("press", commandWidgetClass, box, NULL);
     XtAddCallback(press, XtNcallback, open_dialog, shell);
 
-#if 1  
+#if 1
     cerr << "install to box" << endl;
     XtInstallAccelerators(box, press);
 #else
@@ -724,7 +1572,7 @@ namespace {
   /// ダイアログを出現して終了する
   static int awt_dialog02(int argc, char **argv) {
 
-    static String app_class = "MessageBox", 
+    static String app_class = "MessageBox",
       fallback_resouces[] = { 
       "*international: True",
       "*fontSet: -*-*-*-*-*--24-*",
@@ -749,7 +1597,7 @@ namespace {
     XtVaSetValues(dialog, XtNlabel, XtNewString("press ok to close application."), NULL);
 
     install_accelerators(dialog, "ok");
-  
+
     XtRealizeWidget(top);
     XtAppMainLoop(context);
     XtDestroyApplicationContext(context);
@@ -759,203 +1607,10 @@ namespace {
 
 };
 
-// --------------------------------------------------------------------------------
-
-namespace {
-
-  /// クラス階層を表示するアプリのデータを保持する
-  struct tree_app : xt00 { 
-    /// クラス名とそれを表示するウィジェットの組を保持する
-    map<string, Widget> nodes;
-
-    Widget find_node(WidgetClass wc);
-    Widget add_node(WidgetClass wc, Widget tree);
-    void create_contents(Widget top);
-  };
-
-  /// クラスに対応するwidgetを入手する
-  Widget tree_app::find_node(WidgetClass wc) {
-    const char *cn = getXtClassName(wc);
-    map<string, Widget>::iterator it = nodes.find(cn);
-    // クラス名でウィジェットを引き出す
-    if (it == nodes.end()) return None;
-    return (*it).second;
-  }
-
-  /// クラスに対応するwidgetを追加する
-  Widget tree_app::add_node(WidgetClass wc, Widget tree) {
-    if (!wc) return None;
-
-    Widget t = find_node(wc);
-    if (t) return t;
-
-    const char *cn = getXtClassName(wc);
-    WidgetClass superClass = getXtSuperClass(wc);
-    if (!superClass) {
-      // トップレベルのノード
-      Widget re = 
-	XtVaCreateManagedWidget(cn, commandWidgetClass, tree, 
-				XtNlabel, XtNewString(cn), NULL);
-      nodes[cn] = re;
-      return re;
-    }
-
-    Widget parent = find_node(superClass);
-    if (parent == None) parent = add_node(superClass, tree);
-  
-    Widget re = 
-      XtVaCreateManagedWidget(cn, commandWidgetClass, tree, 
-			      XtNtreeParent, parent, 
-			      XtNlabel, XtNewString(cn), NULL);
-    nodes[cn] = re;
-    return re;
-  }
-
-  /// pannaer が操作されたタイミングで portholeのウィジェットの位置を変えるためのコールバック
-  static void panner_callback (Widget panner,XtPointer closure,XtPointer data) {
-    XawPannerReport *rep = (XawPannerReport *)data;
-    Widget target = (Widget)closure;
-    Arg args[2];
-    if (!target) return;
-    XtSetArg (args[0], XtNx, -rep->slider_x);
-    XtSetArg (args[1], XtNy, -rep->slider_y);
-    XtSetValues (target, args, 2);
-  }
-
-  /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
-  static void porthole_callback(Widget porthole, XtPointer closure, XtPointer data) {
-    Widget panner = (Widget) closure;
-    XawPannerReport *rep = (XawPannerReport *)data;
-    Arg args[6];
-    Cardinal n = 2;
-
-    XtSetArg (args[0], XtNsliderX, rep->slider_x);
-    XtSetArg (args[1], XtNsliderY, rep->slider_y);
-
-    if (rep->changed != (XawPRSliderX | XawPRSliderY)) {
-      XtSetArg (args[2], XtNsliderWidth, rep->slider_width);
-      XtSetArg (args[3], XtNsliderHeight, rep->slider_height);
-      XtSetArg (args[4], XtNcanvasWidth, rep->canvas_width);
-      XtSetArg (args[5], XtNcanvasHeight, rep->canvas_height);
-      n = 6;
-    }
-    XtSetValues(panner, args, n);
-  }
-
-  void tree_app::create_contents(Widget top) {
-    Widget form = 
-      XtVaCreateManagedWidget("form",formWidgetClass, top, NULL);
-
-    Widget panner = 
-      XtVaCreateManagedWidget("panner", pannerWidgetClass, form, NULL);
-
-    Widget porthole = 
-      XtVaCreateManagedWidget("porthole",portholeWidgetClass, form,
-			    XtNbackgroundPixmap, None, NULL);
-
-    Widget tree = 
-      XtVaCreateManagedWidget("tree", treeWidgetClass, porthole, NULL);
-
-    XtAddCallback(porthole, XtNreportCallback, porthole_callback, panner);
-    XtAddCallback(panner, XtNreportCallback, panner_callback, tree);
-
-    WidgetClass awclasses[] = {
-      applicationShellWidgetClass,
-      asciiSinkObjectClass,
-      asciiSrcObjectClass,
-      asciiTextWidgetClass,
-      boxWidgetClass,
-      commandWidgetClass,
-      dialogWidgetClass,
-      labelWidgetClass,
-      listWidgetClass,
-      menuButtonWidgetClass,
-      panedWidgetClass,
-      pannerWidgetClass,
-      portholeWidgetClass,
-      repeaterWidgetClass,
-      scrollbarWidgetClass,
-      stripChartWidgetClass,
-      toggleWidgetClass,
-      treeWidgetClass,
-      multiSinkObjectClass,
-      multiSrcObjectClass,
-      smeBSBObjectClass,
-      smeLineObjectClass,
-      sessionShellWidgetClass,
-      viewportWidgetClass,
-      simpleMenuWidgetClass,
-      NULL,
-    }, *wc = awclasses;
-
-    while (*wc) {
-      add_node(*wc++, tree);
-    }
-
-    XtRealizeWidget(top);
-    XtAddEventHandler(top, NoEventMask, True, dispose_handler, 0);
-    XSetWMProtocols(XtDisplay(top), XtWindow(top), &WM_DELETE_WINDOW, 1 );
-  
-    Dimension canvas_width, canvas_height, slider_width, slider_height;
-    XtVaGetValues(tree,
-		  XtNwidth, &canvas_width,
-		  XtNheight, &canvas_height,
-		  NULL);
-
-    XtVaGetValues(porthole,
-		  XtNwidth, &slider_width,
-		  XtNheight, &slider_height,
-		  NULL);
-  
-    XtVaSetValues(panner,
-		  XtNcanvasWidth, &canvas_width,
-		  XtNcanvasHeight, &canvas_height,
-		  XtNsliderWidth, &slider_width,
-		  XtNsliderHeight, &slider_height,
-		  NULL);
-  
-    XRaiseWindow (XtDisplay(panner), XtWindow(panner));
-
-    XtAddCallback(top, XtNdestroyCallback, delete_app_proc, this);
-  }
-
-  /// アテナ・ウィジェットのクラス階層を表示する
-  static int awt_class_tree(int argc, char **argv) {
-
-    static String app_class = "AwTree", 
-      fallback_resouces[] = { 
-      "*tree.gravity: west",
-      "*geometry: 800x400",
-      NULL,
-    };
-
-    static XrmOptionDescRec options[] = { };
-
-    XtAppContext context;
-    Widget top = 
-      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
-			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
-
-    xatom_initialize(XtDisplay(top));
-    tree_app *app = new tree_app();
-    app->create_contents(top);
-    return app->main_loop(context);
-  }
-
-};
 
 // --------------------------------------------------------------------------------
 
 namespace {
-
-  // ウィジェットの名前を元にメニューを探す
-  static Widget find_menu(Widget widget, String name) {
-    Widget w, menu;
-    
-    for (w = widget; w != NULL; w = XtParent(w))
-      if ((menu = XtNameToWidget(w, name)) != NULL) return menu;
-    return NULL;
-  }
 
   /// メニュー・アイテムの登録準備
   struct menu_item {
@@ -964,14 +1619,6 @@ namespace {
     XtPointer closure; ///< クライアント・データに渡す値
     struct menu_item *sub_menu; ///< カスケード
   };
-
-  static void menu_popup_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " popup" << endl;
-  }
-
-  static void menu_popdown_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " popdown" << endl;
-  }
 
   /** AWのポップアップメニューを作成する
    */
@@ -1003,80 +1650,6 @@ namespace {
 	XtAddCallback(item, XtNcallback, items[i].proc, items[i].closure);
     }
     return menu;
-  }
-
-  /// パラメータにキーが含まれているか診断する
-  static bool param_contains(String name, String *params, Cardinal num) {
-    if (name == NULL || strcasecmp(name,"") == 0 || num == 0) return false;
-    for (Cardinal n = 0; n < num; n++) {
-      if (strcasecmp(name, params[n]) == 0) return true;
-    }
-    return false;
-  }
-
-  /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
-  static void viewport_callback(Widget porthole, XtPointer closure, XtPointer data) {
-    XawPannerReport *rep = (XawPannerReport *)data;
-  
-    cerr << "TRACE: y:" << rep->slider_y << " x:" << rep->slider_x
-	 << " slider width:" << rep->slider_width << " height:" << rep->slider_height
-	 << " canvas width:" << rep->canvas_width << " height:" << rep->canvas_height
-	 << " changed:" << rep->changed << endl;
-  }
-
-  /// リスト項目で次のエントリに移動するアクション
-  /**
-   * パラメータとして有効なのは next, previous, above, below
-   * それ以外のパラメータが渡ってきた場合は無視する
-   */
-  static void change_item_action(Widget list, XEvent *event, String *params, Cardinal *num) {
-    XawListReturnStruct *rs = XawListShowCurrent(list);
-
-    int numberStrings, columns;
-    Boolean isVertical;
-
-    XtVaGetValues(list, XtNnumberStrings, &numberStrings, 
-		  XtNdefaultColumns, &columns,
-		  XtNverticalList, &isVertical,
-		  NULL );
-
-    columns = getXawListColumns(list);
-
-#if 0
-    cerr << "TRACE: " << numberStrings << " items." << endl;
-    cerr << "TRACE: index: " << rs->list_index << " "
-	 << "columns: " << columns << " "
-	 << "vertical: " << isVertical << endl;
-#endif
-    
-    if (num == 0 || param_contains("next",params,*num)) {
-      if (rs->list_index + 1 < numberStrings)
-	XawListHighlight(list, ++rs->list_index);
-    }
-    else if (param_contains("previous",params,*num)) {
-      if (rs->list_index > 0)
-	XawListHighlight(list, --rs->list_index);
-    }
-    else if (param_contains("below",params,*num)) {
-      if (rs->list_index + columns < numberStrings)
-	XawListHighlight(list, rs->list_index += columns);
-    }
-    else if (param_contains("above",params,*num)) {
-      if (rs->list_index >= columns)
-	XawListHighlight(list, rs->list_index -= columns);
-    }
-    else {
-      cerr << "WARN: unnkown no operation" << endl;
-      return;
-    }
-
-    rs = XawListShowCurrent(list);
-    XtCallCallbacks(list, XtNcallback, (XtPointer)rs);
-  }
-
-  /// メニューアイテムを選択した時の処理
-  static void menu_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " selected." << endl;
   }
 
   /// リスト表示アプリの構成要素を格納
@@ -1164,7 +1737,7 @@ namespace {
 			      NULL);
     XtAddCallback(list, XtNcallback, item_selected, this);
 
-    Widget close = 
+    Widget close =
       XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
     XtAddCallback(close, XtNcallback, quit_application, 0);
 
@@ -1267,15 +1840,6 @@ namespace {
     void create_contents(Widget top);
   };
 
-  /// 地域時間を入手する
-  static void fetch_localtime(struct tm *local) {
-    time_t now;
-    if (time(&now) == (time_t)-1) { perror("time"); return; }
-    if (!localtime_r(&now, local)) {
-      cerr << "unkown localtime." << endl;
-    }
-  }
-  
   /// 現在時刻の表示
   static void show_time_proc(XtPointer closure, XtIntervalId *id) {
     text_app *app = (text_app *)closure;
@@ -1364,36 +1928,6 @@ namespace {
 #endif
   }
 
-  /// 選択された領域のテキストを入手する
-  static wstring fetch_selected_text(Widget textw) {
-    XawTextPosition begin_pos, end_pos;
-
-    XawTextGetSelectionPos(textw, &begin_pos, &end_pos);
-    if (begin_pos == end_pos) return L"";
-
-    XawTextBlock text;
-    XawTextPosition pos = XawTextSourceRead(XawTextGetSource(textw), begin_pos, &text, end_pos - begin_pos);
-
-#if 1
-    cerr << "begin:" << begin_pos << endl;
-    cerr << "end:" << end_pos << endl << endl;
-    cerr << "pos:" << pos << endl << endl;
-    cerr << "first:" << text.firstPos << endl;
-    cerr << "length:" << text.length << endl;
-    cerr << "format:" << text.format << endl;
-#endif
-
-    if (text.format == XawFmtWide) {
-      // ワイド文字で返って来るようだ
-#if 0
-      cerr << "format: wide" << endl;
-#endif
-      wstring wstr(((wchar_t *)text.ptr), text.length);
-      return wstr;
-    }
-    return L"";
-  }
-
   /// メニューでテキスト抽出の指令を受け取った時の処理
   static void fetch_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
     text_app *app = (text_app *)client_data;
@@ -1443,19 +1977,6 @@ namespace {
     XawTextSetSelection(app->buf,0,last);
   }
 
-  /// 選択テキストを置き換える
-  static void replace_text(Widget text, wchar_t *buf, size_t len) {
-    XawTextPosition begin_pos, end_pos;
-    XawTextGetSelectionPos(text, &begin_pos, &end_pos);
-    XawTextBlock block;
-    block.firstPos = 0;
-    block.length = len;
-    block.ptr = (char *)buf;
-    block.format = XawFmtWide;
-    int rc = XawTextReplace(text, begin_pos, end_pos, &block);
-    cerr << "TRACE: aw replace selection: " << rc << endl;
-  }
-
   /// 選択テキストを削除する
   static void delete_selection_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
     text_app *app = (text_app *)client_data;
@@ -1464,58 +1985,10 @@ namespace {
     cerr << "TRACE: aw delete selection: " << endl;
   }
 
-  /// テキストを末尾に追加する
-  static void append_text(Widget text, const wchar_t *buf, size_t len) {
-    XawTextPosition last = XawTextLastPosition(text);
-    XawTextBlock block;
-    block.firstPos = 0;
-    block.length = len;
-    block.ptr = (char *)buf;
-    block.format = XawFmtWide;
-    int rc = XawTextReplace(text, last, last, &block);
-    cerr << "TRACE: aw append: " << rc << endl;
-    XawTextSetInsertionPoint(text, last + len);
-  }
-
-  /// テキストをカレット位置に追加する
-  static void insert_text(Widget text, wchar_t *buf, size_t len) {
-    XawTextPosition pos = XawTextGetInsertionPoint(text);
-    XawTextBlock block;
-    block.firstPos = 0;
-    block.length = len;
-    block.ptr = (char *)buf;
-    block.format = XawFmtWide;
-    int rc = XawTextReplace(text, pos, pos, &block);
-    cerr << "TRACE: aw insert: " << rc << endl;
-    XawTextSetInsertionPoint(text, pos + len);
-  }
-
-  ///　現在時刻をカレット位置に挿入する
-  static void insert_datetime_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    Widget text = (Widget)client_data;
-
-    struct tm local;
-    fetch_localtime(&local);
-
-    char buf[200];
-    strftime(buf, sizeof buf, "%Y, %B, %d, %A %p%I:%M:%S", &local);
-
-    size_t len = strlen(buf);
-    wchar_t wcs[len + 1];
-    len = mbstowcs(wcs, buf, len);
-    if (len != (size_t)-1) insert_text(text, wcs, len);
-  }
-
   static void append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
     text_app *app = (text_app *)client_data;
     wchar_t buf[] = L"Hello,world\n";
     append_text(app->buf, buf, wcslen(buf));
-  }
-
-  /// ダイアログテキストを初期化する
-  static void clear_dialog_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    Widget dialog = (Widget )client_data;
-    XtVaSetValues(dialog, XtNvalue, XtNewString(""), NULL);
   }
 
   /// テキストの物理行移動
@@ -1808,7 +2281,6 @@ subcmd awt_cmap[] = {
   { "hello02", awt_hello, },
   { "dialog", awt_dialog, },
   { "dialog02", awt_dialog02, },
-  { "tree", awt_class_tree, },
   { "list", awt_list, },
   { "edit", awt_editor, },
   { "awt", awt_app01, },
