@@ -438,6 +438,90 @@ namespace {
 
   // --------------------------------------------------------------------------------
 
+  /// ダイアログをウィジェット相対で表示する
+  static void popup_dialog(Widget target, Widget shell, XtGrabKind kind) {
+    Position x, y, rootx, rooty;
+    Dimension width, height;
+
+    if (!shell) return;
+
+    // ポップアップすべき位置の計算
+    XtVaGetValues(target, XtNx, &x, XtNy, &y,
+		  XtNwidth, &width, XtNheight, &height, NULL);
+
+    XtTranslateCoords(XtParent(target), x, y, &rootx, &rooty );
+
+    XtVaSetValues(shell, XtNx, rootx + width - 25,
+		XtNy, rooty + height - 25, NULL );
+    XtPopup(shell, kind);
+  }
+
+  /** Commandに登録するコールバック
+   * @param widget この関数を呼び出したCommandの参照
+   * @param client_data コールバック登録で渡したデータ
+   * @param call_data Commandの場合は未使用
+   */
+  static void open_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget shell = (Widget)client_data;
+    // モーダルダイアログ（ただし他のウィンドウとは非排他的)
+    popup_dialog(widget, shell, XtGrabNonexclusive);
+  }
+
+  /// ダイアログのボタンが押されたタイミングでポップダウンさせるためのコールバック
+  static void close_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget dialog = (Widget)client_data;
+    XtPopdown(dialog);
+  }
+
+  /// 子ウィジェットを探して、アクセラレータを登録する
+  static void install_accelerators(Widget parent, const char *name) {
+    Widget wi = XtNameToWidget(parent, name);
+    if (wi) {
+      XtAccelerators accelerators;
+      XtVaGetValues(wi, XtNaccelerators, &accelerators, NULL);
+      XtInstallAccelerators(parent, wi);
+      cerr << "TRACE: widget " << name << ":" << getXtName(wi) << endl;
+      cerr << "TRACE: accelerators: " << accelerators << endl;
+    }
+  }
+
+  /// ダイアログを出現させるボタンを配置したフレーム
+  class Dialog_Button_Frame : public Frame {
+  public:
+    Widget create_contents(Widget shell);
+  };
+
+  class Dialog_Button_Frame_Factory : Frame_Factory {
+    Frame *get_instance() { return new Dialog_Button_Frame(); }
+  };
+
+  Widget Dialog_Button_Frame::create_contents(Widget top) {
+    Widget shell = XtVaCreatePopupShell("confirm", transientShellWidgetClass, top, NULL );
+    Widget dialog = XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, NULL );
+    /* ウィジット関数によってダイアログ内部のボタンをセットする */
+    XawDialogAddButton(dialog, "yes", quit_application, 0 );
+    XawDialogAddButton(dialog, "no", close_dialog, shell );
+
+    install_accelerators(dialog, "yes");
+    install_accelerators(dialog, "no");
+
+    Widget box = XtVaCreateManagedWidget("box", boxWidgetClass, top, NULL);
+    Widget press = XtVaCreateManagedWidget("press", commandWidgetClass, box, NULL);
+    XtAddCallback(press, XtNcallback, open_dialog, shell);
+
+#if 1
+    cerr << "install to box" << endl;
+    XtInstallAccelerators(box, press);
+#else
+    // こちらは必要なかった
+    cerr << "install to shell" << endl;
+    XtInstallAccelerators(top, press);
+#endif
+    return 0;
+  }
+
+  // --------------------------------------------------------------------------------
+
   /// AWのクラスの継承ツリーを出力する
   class Class_Tree : public Frame {
     /// クラス名とそれを表示するウィジェットの組を保持する
@@ -943,12 +1027,6 @@ namespace {
     XtVaSetValues(dialog, XtNvalue, XtNewString(""), NULL);
   }
 
-  /// ダイアログのボタンが押されたタイミングでポップダウンさせるためのコールバック
-  static void close_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
-    Widget dialog = (Widget)client_data;
-    XtPopdown(dialog);
-  }
-
   /// テキストの物理行移動
   void Editor_Frame::goto_line_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
     Editor_Frame *app = (Editor_Frame *)client_data;
@@ -958,36 +1036,6 @@ namespace {
     cerr << "TRACE: #goto_line_text_proc called:" << lineno << endl;
 
     // TODO: 移動する方法を探して実装する
-  }
-
-  /// 子ウィジェットを探して、アクセラレータを登録する
-  static void install_accelerators(Widget parent, const char *name) {
-    Widget wi = XtNameToWidget(parent, name);
-    if (wi) {
-      XtAccelerators accelerators;
-      XtVaGetValues(wi, XtNaccelerators, &accelerators, NULL);
-      XtInstallAccelerators(parent, wi);
-      cerr << "TRACE: widget " << name << ":" << getXtName(wi) << endl;
-      cerr << "TRACE: accelerators: " << accelerators << endl;
-    }
-  }
-
-  /// ダイアログをウィジェット相対で表示する
-  static void popup_dialog(Widget target, Widget shell, XtGrabKind kind) {
-    Position x, y, rootx, rooty;
-    Dimension width, height;
-
-    if (!shell) return;
-
-    // ポップアップすべき位置の計算
-    XtVaGetValues(target, XtNx, &x, XtNy, &y,
-		  XtNwidth, &width, XtNheight, &height, NULL);
-
-    XtTranslateCoords(XtParent(target), x, y, &rootx, &rooty );
-
-    XtVaSetValues(shell, XtNx, rootx + width - 25,
-		XtNy, rooty + height - 25, NULL );
-    XtPopup(shell, kind);
   }
 
   /// テキストの物理行移動のダイアログ表示
@@ -1128,6 +1176,8 @@ namespace {
   /// Athena Widget Set を使うアプリケーションコンテナの利用開始
   static int awt_app01(int argc, char **argv) {
 
+    Dialog_Button_Frame_Factory a06;
+
     Editor_Frame_Factory aa05;
     Folder_List_Factory aa04;
     Class_Tree_Factory aa03;
@@ -1136,6 +1186,7 @@ namespace {
 
     static String fallback_resouces[] = {
       "Simple_Frame_Factory.geometry: 300x200",
+      "Dialog_Button_Frame_Factory.geometry: 300x200",
       "Button_Frame_Factory.geometry: 300x200",
       "Class_Tree_Factory.geometry: 800x400",
 
@@ -1143,10 +1194,21 @@ namespace {
       "*.close.accelerators: #override "
       " Ctrl<KeyPress>w: set() notify() unset()\\n",
 
+      "*.press.label: Press Me!",
+      "*.press.accelerators: Meta<KeyPress>p: set() notify() unset()\\n"
+      " <KeyPress>space: set() notify() unset()",
+
+      "*.dialog.label: Do You want to quit ?",
+      "*.yes.accelerators: <KeyPress>y: set() notify() unset() \\n"
+      " <KeyPress>space: set() notify() unset()",
+
+      "*.no.accelerators: <KeyPress>n: set() notify() unset()\\n"
+      " <KeyPress>Escape: set() notify() unset()",
+
       "*tree.gravity: west",
 
-      "*international: True",
-      "*fontSet: -*-*-*-*-*--24-*",
+      "*international: True", // 国際化を有効に
+      "*fontSet: -*-*-*-*-*--24-*", // フォントの指定
       "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
       "*List.font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
 
@@ -1174,9 +1236,7 @@ namespace {
       " Ctrl <Btn3Down>: XawPositionSimpleMenu(list-menu) XtMenuPopup(list-menu)\\n",
 
 
-      "*international: True",
       "*inputMethod: kinput2",
-      "*fontSet: -*-*-*-*-*--24-*",
       "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
       "*preeditType: OverTheSpot,OffTheSpot,Root",
       "*cursorColor: red",
@@ -1248,6 +1308,8 @@ namespace {
 	XtVaAppInitialize(&context, app_class, options, XtNumber(options),
 			  &argc, argv, fallback_resouces, NULL);
 
+      XtAppAddActions(context, actions, XtNumber(actions));
+
       Frame *fr = (*it)->get_instance();
       printf("frame: %p: %s\n", fr, demangle(typeid(*fr).name()));
 
@@ -1257,8 +1319,6 @@ namespace {
     }
 
     elog(I, "%d factories declared.\n", frame_factories.size());
-
-    XtAppAddActions(context, actions, XtNumber(actions));
 
     XtAppMainLoop(context);
     XtDestroyApplicationContext(context);
@@ -1496,79 +1556,6 @@ namespace {
 
 namespace {
 
-  /** Commandに登録するコールバック
-   * @param widget この関数を呼び出したCommandの参照
-   * @param client_data コールバック登録で渡したデータ
-   * @param call_data Commandの場合は未使用
-   */
-  static void open_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
-    Widget shell = (Widget)client_data;
-    // モーダルダイアログ（ただし他のウィンドウとは非排他的)
-    popup_dialog(widget, shell, XtGrabNonexclusive);
-  }
-
-  /// ダイアログを表示する
-  struct dialog_app : hello_app {
-    virtual Widget create_shell(int *argc, char **argv);
-    virtual void create_content(Widget shell, int argc, char **argv);
-  };
-
-
-  Widget dialog_app::create_shell(int *argc, char **argv) {
-    static String app_class = "Hello2", 
-      fallback_resouces[] = { 
-      "*international: True",
-      "*fontSet: -*-*-*-*-*--24-*",
-      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
-      "*geometry: 320x100",
-      "*.press.label: Press Me!",
-      "*.press.accelerators: Meta<KeyPress>p: set() notify() unset()\\n"
-      " <KeyPress>space: set() notify() unset()",
-      
-      "*.dialog.label: Do You want to quit ?",
-      "*.yes.accelerators: <KeyPress>y: set() notify() unset() \\n"
-      " <KeyPress>space: set() notify() unset()",
-      
-      "*.no.accelerators: <KeyPress>n: set() notify() unset()\\n"
-      " <KeyPress>Escape: set() notify() unset()",
-      NULL,
-    };
-
-    XtAppContext context;
-    return
-      XtVaAppInitialize(&context, app_class, NULL, 0,
-			argc, argv, fallback_resouces, NULL);
-  }
-  
-  void dialog_app::create_content(Widget top, int argc, char **argv) {
-    Widget shell = XtVaCreatePopupShell("confirm", transientShellWidgetClass, top, NULL );
-    Widget dialog = XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, NULL );
-    /* ウィジット関数によってダイアログ内部のボタンをセットする */
-    XawDialogAddButton(dialog, "yes", quit_application, 0 );
-    XawDialogAddButton(dialog, "no", close_dialog, shell );
-
-    install_accelerators(dialog, "yes");
-    install_accelerators(dialog, "no");
-
-    Widget box = XtVaCreateManagedWidget("box", boxWidgetClass, top, NULL);
-    Widget press = XtVaCreateManagedWidget("press", commandWidgetClass, box, NULL);
-    XtAddCallback(press, XtNcallback, open_dialog, shell);
-
-#if 1
-    cerr << "install to box" << endl;
-    XtInstallAccelerators(box, press);
-#else
-    // こちらは必要なかった
-    cerr << "install to shell" << endl;
-    XtInstallAccelerators(top, press);
-#endif
-  }
-
-  /// ポップアップ・ダイアログを出現させる
-  static int awt_dialog(int argc, char **argv) {
-    return run(new dialog_app, &argc,argv);
-  }
-
   /// ダイアログを出現して終了する
   static int awt_dialog02(int argc, char **argv) {
 
@@ -1611,46 +1598,6 @@ namespace {
 // --------------------------------------------------------------------------------
 
 namespace {
-
-  /// メニュー・アイテムの登録準備
-  struct menu_item {
-    String name; ///< アイテム名
-    XtCallbackProc proc; ///< コールバック
-    XtPointer closure; ///< クライアント・データに渡す値
-    struct menu_item *sub_menu; ///< カスケード
-  };
-
-  /** AWのポップアップメニューを作成する
-   */
-  static Widget create_popup_menu(String menu_name, Widget shell, menu_item *items) {
-
-    Widget menu = 
-      XtVaCreatePopupShell( menu_name, simpleMenuWidgetClass, shell, NULL );
-
-    XtAddCallback(menu, XtNpopupCallback, menu_popup_proc, 0);
-    XtAddCallback(menu, XtNpopdownCallback, menu_popdown_proc, 0);
-
-    Widget item;
-
-    for (int i = 0; items[i].name; i++) {
-      if (strcmp("-", items[i].name) == 0) {
-	XtVaCreateManagedWidget("-", smeLineObjectClass, menu, NULL );
-	continue;
-      }
-
-      if (items[i].sub_menu) {
-	Widget sub = create_popup_menu(items[i].name, shell, items[i].sub_menu);
-	item = XtVaCreateManagedWidget(items[i].name, smeCascadeObjectClass, menu, 
-				       XtNsubMenu, sub, NULL );
-	continue;
-      }
-
-      item = XtVaCreateManagedWidget(items[i].name, smeBSBObjectClass, menu, NULL );
-      if (items[i].proc)
-	XtAddCallback(item, XtNcallback, items[i].proc, items[i].closure);
-    }
-    return menu;
-  }
 
   /// リスト表示アプリの構成要素を格納
   struct list_app : xt00 {
@@ -1705,14 +1652,14 @@ namespace {
 			    XtNmenuName, "list-menu", 
 			    NULL);
 
-    struct menu_item sub_items[] = {
+    struct Menu_Item sub_items[] = {
       { "sub-item1", menu_selected, },
       { "sub-item2", menu_selected, },
       { "sub-item3", menu_selected, },
       { 0, },
     };
 
-    struct menu_item items[] = {
+    struct Menu_Item items[] = {
       { "item1", menu_selected, },
       { "item2", menu_selected, },
       { "menu-item2", menu_selected, 0, sub_items },
@@ -2085,7 +2032,7 @@ namespace {
     XtAddCallback(close, XtNcallback, quit_application, 0);
     XtInstallAccelerators(buf, close);
 
-    struct menu_item submenu[] = {
+    struct Menu_Item submenu[] = {
       { "item1", menu_selected, },
       { "item2", menu_selected, },
       { "item3", menu_selected, },
@@ -2094,7 +2041,7 @@ namespace {
 
     //create_popup_menu("memo-submenu", top, submenu);
 
-    struct menu_item items[] = {
+    struct Menu_Item items[] = {
       { "select-all", select_all_text_proc, this, },
       { "delete-selection", delete_selection_text_proc, this, },
       { "hello", append_hello_text_proc, this, },
@@ -2109,7 +2056,7 @@ namespace {
 
     create_popup_menu("memo-menu", top, items);
 
-    struct menu_item shortcut_item[] = {
+    struct Menu_Item shortcut_item[] = {
       { "aaa", menu_selected, },
       { "bbb", menu_selected, },
       { "fetch-text", fetch_text_proc, this, },
@@ -2279,7 +2226,6 @@ subcmd awt_cmap[] = {
   { "win03", onlytop, },
   { "multi", awt_multi_apps, },
   { "hello02", awt_hello, },
-  { "dialog", awt_dialog, },
   { "dialog02", awt_dialog02, },
   { "list", awt_list, },
   { "edit", awt_editor, },
