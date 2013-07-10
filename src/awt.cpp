@@ -1,5 +1,15 @@
 /*! \file
  * \brief Athena Widget Setを使ったサンプルコード
+
+  Xlibがサポートするロケールと libcがサポートするロケールが合致していないと
+  エディタはうまく動作しない点に注意すること。
+
+  CentOS5.x で提供される ja_JP.utf8 はXlibがサポートしていない。
+  一見動作しているようだが、処理中に バッファオーバフローが検出されて停止してしまう。
+
+  この問題を回避するために例えば
+  # localedef -f EUC-JP -i ja_JP /usr/lib/locale/ja_JP.eucJP
+  として、ja_JP.eucJP を定義して、これを利用する必要がある。
  */
 
 #include <iostream>
@@ -361,14 +371,6 @@ namespace {
     XtCallCallbacks(list, XtNcallback, (XtPointer)rs);
   }
 
-  static void menu_popup_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " popup" << endl;
-  }
-
-  static void menu_popdown_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    cout << "TRACE: " << XtName(widget) << " popdown" << endl;
-  }
-
   // ウィジェットの名前を元にメニューを探す
   static Widget find_menu(Widget widget, String name) {
     Widget w, menu;
@@ -376,6 +378,83 @@ namespace {
     for (w = widget; w != NULL; w = XtParent(w))
       if ((menu = XtNameToWidget(w, name)) != NULL) return menu;
     return NULL;
+  }
+
+  /// メニューの表示位置を調整する
+  static void PositionMenu(Widget w, XPoint *loc) {
+    Arg arglist[2];
+    Cardinal num_args = 0;
+
+    XtRealizeWidget(w);
+
+    XtSetArg(arglist[num_args], XtNx, loc->x); num_args++;
+    XtSetArg(arglist[num_args], XtNy, loc->y); num_args++;
+    XtSetValues(w, arglist, num_args);
+  }
+
+  /// ポップアップ・メニューの表示
+  static void popup_action(Widget w, XEvent *event, String *params, Cardinal *num) {
+    cerr << "TRACE: " << XtName(w) << ":popup." << endl;
+
+    Widget menu;
+    XPoint loc;
+
+    if (*num != 1) {
+      XtAppWarning(XtWidgetToApplicationContext(w),
+		   "SimpleMenuWidget: position menu action expects "
+		   "only one parameter which is the name of the menu.");
+      return;
+    }
+
+    if ((menu = find_menu(w, params[0])) == NULL) {
+      char error_buf[BUFSIZ];
+      snprintf(error_buf, sizeof(error_buf),
+	       "SimpleMenuWidget: could not find menu named %s.",
+	       params[0]);
+      XtAppWarning(XtWidgetToApplicationContext(w), error_buf);
+      return;
+    }
+
+    Boolean spring_loaded = False;
+    switch (event->type) {
+    case ButtonPress:
+      spring_loaded = True;
+    case ButtonRelease:
+      loc.x = event->xbutton.x_root;
+      loc.y = event->xbutton.y_root;
+      PositionMenu(menu, &loc);
+      break;
+    case EnterNotify:
+    case LeaveNotify:
+      loc.x = event->xcrossing.x_root;
+      loc.y = event->xcrossing.y_root;
+      PositionMenu(menu, &loc);
+      break;
+    case MotionNotify:
+      loc.x = event->xmotion.x_root;
+      loc.y = event->xmotion.y_root;
+      PositionMenu(menu, &loc);
+      break;
+    default:
+      PositionMenu(menu, NULL);
+      break;
+    }
+#if 0
+    XtMenuPopupAction(w,event,params,num);
+#else
+    if (spring_loaded)
+      XtPopupSpringLoaded(menu);
+    else
+      XtPopup(menu, XtGrabNonexclusive);
+#endif
+  }
+
+  static void menu_popup_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " popup" << endl;
+  }
+
+  static void menu_popdown_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    cout << "TRACE: " << XtName(widget) << " popdown" << endl;
   }
 
   /** AWのポップアップメニューを作成する
@@ -410,6 +489,54 @@ namespace {
     return menu;
   }
 
+  // --------------------------------------------------------------------------------
+
+  /// ラベルだけ配置したフレーム
+  class Message_Frame : public Frame {
+    /// リソース定義
+    struct hello_res { String message; Boolean help; };
+    hello_res res;
+  public:
+    Widget create_contents(Widget shell);
+  };
+
+  /// ラベルだけ・フレームの生成クラス
+  class Message_Frame_Factory : Frame_Factory {
+    Frame *get_instance() { return new Message_Frame(); }
+  };
+
+  Widget Message_Frame::create_contents(Widget shell) {
+
+    static XtResource resources[] = {
+      { "message", "Message", XtRString, sizeof(String),
+	XtOffset(hello_res *, message), XtRImmediate, (XtPointer)"Hello,world" },
+    };
+
+    XtVaGetApplicationResources(shell, &res, resources, XtNumber(resources), NULL);
+    cerr << "TRACE: res.message:" << res.message << endl;
+
+    Widget label =
+      XtVaCreateManagedWidget("message", labelWidgetClass, shell,
+			      XtNjustify, XtJustifyCenter,
+			      XtNlabel, XtNewString(res.message),
+			      NULL);
+
+    const char *argv[]= { "aa", "bb", "cc", };
+    int argc = XtNumber(argv);
+
+    if (0 && argc > 1) {
+      // 渡されたパラメータを表示する
+      string cap;
+      const char *rep = "";
+      for (int i = 1; i < argc; i++) {
+	cap.append(rep).append(argv[i]);
+	rep = " ";
+      }
+      cerr << cap << endl;
+      XtVaSetValues(label, XtNlabel, XtNewString(cap.c_str()), NULL);
+    }
+
+  }
 
   // --------------------------------------------------------------------------------
 
@@ -835,6 +962,7 @@ namespace {
     static void open_goto_list_dialog_proc(Widget widget, XtPointer client_data, XtPointer call_data);
     static void show_potision_proc(XtPointer closure, XtIntervalId *id);
     static void position_callback(Widget widget, XtPointer client_data, XtPointer call_data);
+    static Boolean text_ready(XtPointer closure);
 
   public:
     Editor_Frame() : goto_line_dialog(None),timer(0),interval(1000),
@@ -1097,6 +1225,23 @@ namespace {
 		      app->position_interval, show_potision_proc, app);
   }
 
+  /// 処理するイベントがなくなった時に呼び出される
+  Boolean Editor_Frame::text_ready(XtPointer closure) {
+    Editor_Frame *app = (Editor_Frame *)closure;
+
+    cerr << "TRACE: work proc called" << endl;
+
+    wstring wtext = xwin::load_wtext(__FILE__);
+
+    append_text(app->buf, wtext.c_str(), wtext.size());
+
+    // 時刻表示のタイマーを登録
+    app->timer =
+      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
+		      app->interval, show_time_proc, app);
+    return True;
+  }
+
   Widget Editor_Frame::create_contents(Widget top) {
     Widget pane =
       XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
@@ -1167,6 +1312,12 @@ namespace {
 
     XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
 
+    XtAppContext context = XtWidgetToApplicationContext(top);
+
+    XtWorkProcId work = XtAppAddWorkProc(context, text_ready, this);
+    cerr << "TRACE: ready proc: " << this << ":" << work << endl;
+    cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
+
     return 0;
   }
 
@@ -1176,13 +1327,13 @@ namespace {
   /// Athena Widget Set を使うアプリケーションコンテナの利用開始
   static int awt_app01(int argc, char **argv) {
 
-    Dialog_Button_Frame_Factory a06;
-
-    Editor_Frame_Factory aa05;
-    Folder_List_Factory aa04;
-    Class_Tree_Factory aa03;
-    Button_Frame_Factory aa02;
     Simple_Frame_Factory aa01;
+    Message_Frame_Factory aa02;
+    Button_Frame_Factory aa03;
+    Dialog_Button_Frame_Factory a04;
+    Class_Tree_Factory aa05;
+    Folder_List_Factory aa06;
+    Editor_Frame_Factory aa07;
 
     static String fallback_resouces[] = {
       "Simple_Frame_Factory.geometry: 300x200",
@@ -1226,12 +1377,12 @@ namespace {
       " <Btn5Down>: StartScroll(Forward)\\n",
 
       "*List.translations: #override "
-      " Ctrl<Key>f: changeItem(next)\\n"
-      " Ctrl<Key>b: changeItem(previous)\\n"
-      " <Key>Right: changeItem(next)\\n"
-      " <Key>Left: changeItem(previous)\\n"
-      " <Key>Up: changeItem(above)\\n"
-      " <Key>Down: changeItem(below)\\n"
+      " Ctrl<Key>f: change-item(next)\\n"
+      " Ctrl<Key>b: change-item(previous)\\n"
+      " <Key>Right: change-item(next)\\n"
+      " <Key>Left: change-item(previous)\\n"
+      " <Key>Up: change-item(above)\\n"
+      " <Key>Down: change-item(below)\\n"
       " <Btn1Down>: Set() Notify() \\n"
       " Ctrl <Btn3Down>: XawPositionSimpleMenu(list-menu) XtMenuPopup(list-menu)\\n",
 
@@ -1278,47 +1429,82 @@ namespace {
       " Ctrl<Key>F2: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
       " Ctrl<Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
       " Ctrl<Btn3Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n",
+
+#if 0
+      "*menu_bar.translations: #override "
+      " <Btn3Down>: XawPositionSimpleMenu(text-shortcut) MenuPopup(text-shortcut)\\n"
+      " !Ctrl <Btn3Down>: XawPositionSimpleMenu(text-shortcut) MenuPopup(text-shortcut)\\n"
+      " !Lock Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+#else
+      "*menu_bar.translations: #override "
+      " <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+      " Ctrl <Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      " Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+      " !Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+      " !Lock Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
+#endif
+      ,
+      "*.jump.accelerators: <KeyPress>Return: set() notify() unset()\\n",
+      "*.cancel.accelerators: <KeyPress>Escape: set() notify() unset()\\n",
+      "*.close.accelerators: #override Ctrl<KeyPress>w: set() notify() unset()\\n",
       0,
     };
 
     XtAppContext context;
-    static XrmOptionDescRec options[] = {};
+
+    // アプリケーション追加オプションの様式定義
+    static XrmOptionDescRec options[] = {
+      { "-msg", ".Message", XrmoptionSepArg, NULL, },
+    };
+
     Widget top_level_shell;
 
     XtSetLanguageProc(NULL, NULL, NULL);
 
     static XtActionsRec actions[] = {
-      { "changeItem", change_item_action, },
+      { "change-item", change_item_action, },
+      { "popup-shortcut", popup_action, },
     };
+
+    Frame_Factory *ff = 0;
+    const char *app_class = "";
 
     vector<Frame_Factory *>::iterator it = frame_factories.begin();
     for (; it != frame_factories.end(); it++) {
-      const char *app_class = (*it)->get_class_name();
+      ff = *it;
+
+      app_class = ff->get_class_name();
       if (!app_class) {
-	const char *name = demangle(typeid(**it).name());
+	const char *name = demangle(typeid(*ff).name());
 	const char *p;
 	while ((p = strstr(name,"::"))) { name = p + 2; }
 	app_class = name;
       }
 
       /// 取りあえずファクトリ名とバージョンを表示してみる
-      printf("factory: %s: %s\n", app_class, (*it)->get_version());
-
-      top_level_shell =
-	XtVaAppInitialize(&context, app_class, options, XtNumber(options),
-			  &argc, argv, fallback_resouces, NULL);
-
-      XtAppAddActions(context, actions, XtNumber(actions));
-
-      Frame *fr = (*it)->get_instance();
-      printf("frame: %p: %s\n", fr, demangle(typeid(*fr).name()));
-
-      Server_Resource_Impl *sr = new Server_Resource_Impl(top_level_shell);
-      sr->open_frame(fr) ;
-      break;
+      printf("factory: %s: %s\n", app_class, ff->get_version());
     }
-
     elog(I, "%d factories declared.\n", frame_factories.size());
+
+    if (!ff) return 1;
+
+    top_level_shell =
+      XtVaAppInitialize(&context, app_class, options, XtNumber(options),
+			&argc, argv, fallback_resouces, NULL);
+
+    XawSimpleMenuAddGlobalActions(context);
+
+    XtRegisterGrabAction(popup_action, True,
+			 ButtonPressMask | ButtonReleaseMask ,
+			 GrabModeAsync, GrabModeAsync);
+
+    XtAppAddActions(context, actions, XtNumber(actions));
+
+    Frame *fr = ff->get_instance();
+    printf("frame: %p: %s\n", fr, demangle(typeid(*fr).name()));
+
+    Server_Resource_Impl *sr = new Server_Resource_Impl(top_level_shell);
+    sr->open_frame(fr) ;
 
     XtAppMainLoop(context);
     XtDestroyApplicationContext(context);
@@ -1397,7 +1583,7 @@ namespace {
     static XrmOptionDescRec options[] = { };
 
     XtAppContext context;
-    Widget top = 
+    Widget top =
       XtVaOpenApplication(&context, app_class, options, XtNumber(options),
 			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
     app_shell_count++;
@@ -1424,138 +1610,6 @@ namespace {
 
 namespace {
 
-  /// メインループの関数とデストラクタを定義する
-  struct xt00 {
-    virtual ~xt00() { cerr << "TRACE: " << this << " deleting." << endl; }
-    static int main_loop(XtAppContext context);
-  };
-
-  int xt00::main_loop(XtAppContext context) {
-    XtAppMainLoop(context);
-    XtDestroyApplicationContext(context);
-    cerr << "TRACE: context destroyed." << endl;
-    return 0;
-  }
- 
-  /// メッセージを表示するだけの単純なアプリ
-  struct hello_app : xt00 {
-    /// リソース定義
-    struct hello_res {
-      String message;
-      Boolean help;
-    };
-    hello_res res;
-    virtual void initialize();
-    virtual Widget create_shell(int *argc, char **argv);
-    virtual void create_content(Widget shell, int argc, char **argv);
-  };
-
-  /// ツールキットの初期化
-  void hello_app::initialize() {
-    XtSetLanguageProc(NULL, NULL, NULL);
-  }
-
-  /// シェル・ウィジェットの作成
-  Widget hello_app::create_shell(int *argc, char **argv) {
-    static String app_class = "Hello", 
-      fallback_resouces[] = { 
-      "*international: True", // 国際化
-      "*fontSet: -*-*-*-*-*--24-*", // フォントの指定 
-      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
-      "*geometry: 320x100",
-      NULL,
-    };
-    /*
-      フォールバック・リソースはstatic 領域に作成する必要がある。
-     */
-
-    // アプリケーション追加オプションの様式定義
-    static XrmOptionDescRec options[] = {
-      { "-msg", ".Message", XrmoptionSepArg, NULL, },
-    };
-
-    XtAppContext context;
-    Widget top_level_shell = 
-      XtVaAppInitialize(&context, app_class, options, XtNumber(options),
-			argc, argv, fallback_resouces, NULL);
-    return top_level_shell;
-  }
-
-  /// アプリケーション・インスタンスの破棄
-  static void delete_app_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    xt00 *app = (xt00 *)client_data;
-    cerr << "TRACE: app deleteing.. " << app << endl;
-    delete app;
-  }
-
-  /// 引数の確認用
-  static void show_args(int argc, char **argv) {
-    cerr << "argc: " << argc << endl;
-    cerr << "optind: " << optind << endl;
-    
-    for (int i = 0; i < argc; i++)
-      cerr << i << ": " << argv[i] << endl;
-  }
-
-  /// アプリケーション・リソースの様式定義
-  void hello_app::create_content(Widget shell, int argc, char **argv) {
-    static XtResource resources[] = {
-      { "message", "Message", XtRString, sizeof(String),
-	XtOffset(hello_res *, message), XtRImmediate, (XtPointer)"Hello,world" },
-    };
-    
-    XtVaGetApplicationResources(shell, &res, resources, XtNumber(resources), NULL);
-    cerr << "TRACE: res.message:" << res.message << endl;
-    show_args(argc,argv);
-    
-    Widget label = 
-      XtVaCreateManagedWidget("message", labelWidgetClass, shell, 
-			      XtNjustify, XtJustifyCenter,
-			      XtNlabel, XtNewString(res.message),
-			      NULL);
-    if (argc > 1) {
-      // 渡されたパラメータを表示する
-      string cap;
-      const char *rep = "";
-      for (int i = 1; i < argc; i++) {
-	cap.append(rep).append(argv[i]);
-	rep = " ";
-      }
-      cerr << cap << endl;
-      
-      XtVaSetValues(label, XtNlabel, XtNewString(cap.c_str()), NULL);
-    }
-  
-    XtAddCallback(shell, XtNdestroyCallback, delete_app_proc, this);
-  }
-
-  /// アプリケーションの実行
-  static int run(hello_app *app,int *argc,char **argv) {
-    app->initialize();
-    Widget shell = app->create_shell(argc, argv);
-    app->create_content(shell, *argc, argv);
-    XtRealizeWidget(shell);
-
-    xatom_initialize(XtDisplay(shell));
-    XtAddEventHandler(shell, NoEventMask, True, dispose_handler, 0);
-    XSetWMProtocols(XtDisplay(shell), XtWindow(shell), &WM_DELETE_WINDOW, 1 );
-    
-    XtAppContext context = XtWidgetToApplicationContext(shell);
-    return app->main_loop(context);
-  }
-
-  /// メッセージを出現させる
-  static int awt_hello(int argc, char **argv) {
-    return run(new hello_app, &argc,argv);
-  }
-
-};
-
-
-// --------------------------------------------------------------------------------
-
-namespace {
-
   /// ダイアログを出現して終了する
   static int awt_dialog02(int argc, char **argv) {
 
@@ -1574,7 +1628,7 @@ namespace {
     XtAppContext context;
     static XrmOptionDescRec options[] = { };
 
-    Widget top = 
+    Widget top =
       XtVaOpenApplication(&context, app_class, options, XtNumber(options),&argc,argv,
 			  fallback_resouces, applicationShellWidgetClass, NULL);
 
@@ -1594,629 +1648,6 @@ namespace {
 
 };
 
-
-// --------------------------------------------------------------------------------
-
-namespace {
-
-  /// リスト表示アプリの構成要素を格納
-  struct list_app : xt00 {
-    Widget list;
-    vector<string> entries;
-
-    XawListReturnStruct last_selected;
-    XtIntervalId timer;
-    long interval; // ms
-
-    list_app() : list(0), timer(0),interval(400) { }
-    ~list_app() { }
-    void create_contents(Widget top);
-  };
-
-  /// リストアイテムを選択した時の処理
-  static void item_selected_timer(XtPointer closure, XtIntervalId *id) {
-    list_app *app = (list_app *)closure;
-
-    app->timer = 0;
-    cerr << "TRACE: item selected:" << app->last_selected.list_index 
-	 << ":" << app->last_selected.string << endl;
-  }
-
-  /// リストアイテムを選択した時の処理
-  static void item_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
-    XawListReturnStruct *rs = (XawListReturnStruct *)call_data;
-    list_app *app = (list_app *)client_data;
-
-    app->last_selected = *rs;
-    // このタイミングではタイマーを設定するだけで、主要な処理は遅延実行する
-
-    if (app->timer) XtRemoveTimeOut(app->timer);
-    app->timer =
-      XtAppAddTimeOut(XtWidgetToApplicationContext(widget),
-		      app->interval, item_selected_timer, app);
-    if (0)
-      cout << "TRACE: " << XtName(widget) << " item selected." << endl;
-  }
-
-  void list_app::create_contents(Widget top) {
-
-    xwin::load_dirent(".", entries, false);
-    String *slist = xwin::as_String_array(entries);
-
-    Widget pane = 
-      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
-    Widget menu_bar = 
-      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
-
-    XtVaCreateManagedWidget("list", menuButtonWidgetClass, menu_bar, 
-			    XtNmenuName, "list-menu", 
-			    NULL);
-
-    struct Menu_Item sub_items[] = {
-      { "sub-item1", menu_selected, },
-      { "sub-item2", menu_selected, },
-      { "sub-item3", menu_selected, },
-      { 0, },
-    };
-
-    struct Menu_Item items[] = {
-      { "item1", menu_selected, },
-      { "item2", menu_selected, },
-      { "menu-item2", menu_selected, 0, sub_items },
-      { "-", },
-      { "close", quit_application, },
-      { 0, },
-    };
-
-    create_popup_menu("list-menu", pane, items);
-
-    Widget viewport = 
-      XtVaCreateManagedWidget("viewport", viewportWidgetClass, pane,
-			      XtNallowVert, True,
-			      XtNuseRight, True,
-			      NULL);
-    XtAddCallback(viewport, XtNreportCallback, viewport_callback, 0);
-    list = 
-      XtVaCreateManagedWidget("list", listWidgetClass, viewport,
-			      XtNlist, (XtArgVal)slist,
-			      XtNpasteBuffer, True,
-			      //XtNdefaultColumns, (XtArgVal)1,
-			      NULL);
-    XtAddCallback(list, XtNcallback, item_selected, this);
-
-    Widget close =
-      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
-    XtAddCallback(close, XtNcallback, quit_application, 0);
-
-    XtInstallAccelerators(list, close);
-    XtRealizeWidget(top);
-
-    // 初期状態で選択されているようにする
-    XawListHighlight(list, 0);
-    
-    Widget vertical = XtNameToWidget(viewport, "vertical");
-    if (vertical) XtInstallAccelerators(list, vertical);
-
-    XtAddEventHandler(top, NoEventMask, True, dispose_handler, 0);
-    XSetWMProtocols(XtDisplay(top), XtWindow(top), &WM_DELETE_WINDOW, 1 );
-
-    XtAddCallback(top, XtNdestroyCallback, delete_app_proc, this);
-  }
-
-  /// リスト表示の確認
-  static int awt_list(int argc, char **argv) {
-
-    static String app_class = "ListApp", 
-      fallback_resouces[] = { 
-      "*international: True",
-      "*fontSet: -*-*-*-*-*--24-*",
-      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
-      "*List.font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
-      "ListApp.geometry: 800x400",
-      
-      "*Viewport.vertical.accelerators: #override "
-      " Ctrl<KeyPress>Next: StartScroll(Forward) NotifyScroll(Proportional) EndScroll()\\n"
-      " Ctrl<KeyPress>Prior: StartScroll(Backward) NotifyScroll(Proportional) EndScroll()\\n"
-      " <Btn4Down>: StartScroll(Backward)\\n"
-      " <Btn5Down>: StartScroll(Forward)\\n"
-      " <BtnUp>:NotifyScroll(Proportional) EndScroll()\n",
-      
-      "*Viewport.vertical.translations: #override "
-      " <Btn4Down>: StartScroll(Backward)\\n"
-      " <Btn5Down>: StartScroll(Forward)\\n",
-    
-      "*List.translations: #override "
-      " Ctrl<Key>f: changeItem(next)\\n"
-      " Ctrl<Key>b: changeItem(previous)\\n"
-      " <Key>Right: changeItem(next)\\n"
-      " <Key>Left: changeItem(previous)\\n"
-      " <Key>Up: changeItem(above)\\n"
-      " <Key>Down: changeItem(below)\\n"
-      " <Btn1Down>: Set() Notify() \\n"
-      " Ctrl <Btn3Down>: XawPositionSimpleMenu(list-menu) XtMenuPopup(list-menu)\\n",
-      "*.close.accelerators: #override Ctrl<KeyPress>w: set() notify() unset()\\n",
-      0,
-    };
-
-    XtActionsRec actions[] = { 
-      { "changeItem", change_item_action, },
-    };
-
-    XtSetLanguageProc(NULL, NULL, NULL);
-
-    XtAppContext context;
-    Widget top = 
-      XtVaAppInitialize(&context, app_class, NULL, 0,
-			&argc, argv, fallback_resouces, NULL);
-
-    XtAppAddActions(context, actions, XtNumber(actions));
-    xatom_initialize(XtDisplay(top));
-
-    list_app *app = new list_app();
-    app->create_contents(top);
-    return app->main_loop(context);
-  }
-
-};
-
-// --------------------------------------------------------------------------------
-
-namespace {
-
-  /// テキスト・エディタの構成要素を格納
-  struct text_app : xt00 {
-    /// GUIパーツ
-    Widget buf, status;
-
-    /// 物理行移動のためのダイアログ
-    Widget goto_line_dialog;
-
-    /// 時刻表示のタイマー
-    XtIntervalId timer;
-    /// 時刻表示のインターバル
-    long interval; // ms
-
-    XtIntervalId position_timer;
-    long position_interval; // ms
-
-    XawTextPositionInfo save_pos;
-
-    text_app() : goto_line_dialog(None),timer(0),interval(1000),
-		 position_timer(0), position_interval(600) { }
-
-    void create_contents(Widget top);
-  };
-
-  /// 現在時刻の表示
-  static void show_time_proc(XtPointer closure, XtIntervalId *id) {
-    text_app *app = (text_app *)closure;
-
-    struct tm local;
-    fetch_localtime(&local);
-
-    char buf[200];
-    strftime(buf, sizeof buf, "%Y, %B, %d, %A %p%I:%M:%S", &local);
-    strftime(buf, sizeof buf, "%p %I:%M", &local);
-    XtVaSetValues(app->status, XtNstring, XtNewString(buf), NULL);
-
-    // 再開するために再登録
-    app->timer = 
-      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
-		      app->interval, show_time_proc, app);
-  }
-
-  /// メニューの表示位置を調整する
-  static void PositionMenu(Widget w, XPoint *loc) {
-    Arg arglist[2];
-    Cardinal num_args = 0;
-
-    XtRealizeWidget(w);
-    
-    XtSetArg(arglist[num_args], XtNx, loc->x); num_args++;
-    XtSetArg(arglist[num_args], XtNy, loc->y); num_args++;
-    XtSetValues(w, arglist, num_args);
-  }
-
-  /// ポップアップ・メニューの表示
-  static void popup_action(Widget w, XEvent *event, String *params, Cardinal *num) {
-    cerr << "TRACE: " << XtName(w) << ":popup." << endl;
-
-    Widget menu;
-    XPoint loc;
-
-    if (*num != 1) {
-      XtAppWarning(XtWidgetToApplicationContext(w),
-		   "SimpleMenuWidget: position menu action expects "
-		   "only one parameter which is the name of the menu.");
-      return;
-    }
-  
-    if ((menu = find_menu(w, params[0])) == NULL) {
-      char error_buf[BUFSIZ];
-    
-      snprintf(error_buf, sizeof(error_buf),
-	       "SimpleMenuWidget: could not find menu named %s.",
-	       params[0]);
-      XtAppWarning(XtWidgetToApplicationContext(w), error_buf);
-      return;
-    }
-  
-    Boolean spring_loaded = False;
-    switch (event->type) {
-    case ButtonPress:
-      spring_loaded = True;
-    case ButtonRelease:
-      loc.x = event->xbutton.x_root;
-      loc.y = event->xbutton.y_root;
-      PositionMenu(menu, &loc);
-      break;
-    case EnterNotify:
-    case LeaveNotify:
-      loc.x = event->xcrossing.x_root;
-      loc.y = event->xcrossing.y_root;
-      PositionMenu(menu, &loc);
-      break;
-    case MotionNotify:
-      loc.x = event->xmotion.x_root;
-      loc.y = event->xmotion.y_root;
-      PositionMenu(menu, &loc);
-      break;
-    default:
-      PositionMenu(menu, NULL);
-      break;
-    }
-#if 0
-    XtMenuPopupAction(w,event,params,num);
-#else
-    if (spring_loaded)
-      XtPopupSpringLoaded(menu);
-    else
-      XtPopup(menu, XtGrabNonexclusive);
-#endif
-  }
-
-  /// メニューでテキスト抽出の指令を受け取った時の処理
-  static void fetch_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    text_app *app = (text_app *)client_data;
-
-    cout << XtName(app->buf) << " selected" << endl;
-
-    XawTextPosition begin_pos, end_pos;
-    XawTextGetSelectionPos(app->buf, &begin_pos, &end_pos);
-    if (begin_pos == end_pos) {
-      String text;
-      XtVaGetValues(app->buf, XtNstring, &text, NULL );
-      cout << text << endl << flush;
-      return;
-    }
-#if 1  
-    wstring wstr = fetch_selected_text(app->buf);
-    printf("%ls\n", wstr.c_str());
-    fflush(stdout);
-#else
-    XawTextBlock text;
-    XawTextPosition pos = XawTextSourceRead(XawTextGetSource(app->buf), begin_pos, &text, end_pos - begin_pos);
-
-    cerr << "begin:" << begin_pos << endl;
-    cerr << "end:" << end_pos << endl << endl;
-    cerr << "pos:" << pos << endl << endl;
-
-    cerr << "first:" << text.firstPos << endl;
-    cerr << "length:" << text.length << endl;
-    cerr << "format:" << text.format << endl;
-
-    if (text.format == XawFmtWide) {
-      cerr << "format: wide" << endl;
-      wstring wstr(((wchar_t *)text.ptr), text.length);
-      printf("%ls\n", wstr.c_str());
-    }
-    else {
-      string mbstr(text.ptr + text.firstPos, text.length);
-      printf("%s\n", mbstr.c_str());
-    }
-#endif
-  }
-
-  /// すべてのテキストを選択(セレクションには入れない)
-  static void select_all_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    text_app *app = (text_app *)client_data;
-    XawTextPosition last = XawTextLastPosition(app->buf);
-    XawTextSetSelection(app->buf,0,last);
-  }
-
-  /// 選択テキストを削除する
-  static void delete_selection_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    text_app *app = (text_app *)client_data;
-
-    replace_text(app->buf, L"", 0) ;
-    cerr << "TRACE: aw delete selection: " << endl;
-  }
-
-  static void append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    text_app *app = (text_app *)client_data;
-    wchar_t buf[] = L"Hello,world\n";
-    append_text(app->buf, buf, wcslen(buf));
-  }
-
-  /// テキストの物理行移動
-  static void goto_line_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    text_app *app = (text_app *)client_data;
-    const char *value = XawDialogGetValueString(app->goto_line_dialog);
-
-    int lineno = atoi(value);
-    cerr << "TRACE: #goto_line_text_proc called:" << lineno << endl;
-
-    // TODO: 移動する方法を探して実装する
-  }
-
-  /// テキストの物理行移動のダイアログ表示
-  static void open_goto_list_dialog_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    text_app *app = (text_app *)client_data;
-
-    if (!app->goto_line_dialog) {
-      Widget shell = 
-	XtVaCreatePopupShell("goto-line", transientShellWidgetClass, find_shell(widget, 0), NULL );
-
-      Widget dialog = app->goto_line_dialog = 
-	XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, 
-				XtNvalue, XtNewString(""), NULL );
-
-      /* ウィジット関数によってダイアログ内部のボタンをセットする */
-      XawDialogAddButton(dialog, "jump", goto_line_text_proc, app );
-      XawDialogAddButton(dialog, "clear", clear_dialog_text_proc, dialog );
-      XawDialogAddButton(dialog, "cancel", close_dialog, shell );
-
-      Widget value = XtNameToWidget(dialog, "value");
-
-      install_accelerators(dialog, "jump");
-      install_accelerators(dialog, "cancel");
-
-      install_accelerators(value, "jump");
-      install_accelerators(value, "cancel");
-
-      XtVaSetValues(dialog, XtNlabel, XtNewString("line number:"), NULL);
-    }
-
-    XtVaSetValues(app->goto_line_dialog, XtNvalue, XtNewString(""), NULL);
-
-    // モーダルダイアログ（ただし他のウィンドウとは非排他的)
-    popup_dialog(widget, find_shell(app->goto_line_dialog,0), XtGrabNonexclusive);
-  }
-
-  /// 現在カーソル位置の表示
-  static void show_potision_proc(XtPointer closure, XtIntervalId *id) {
-    text_app *app = (text_app *)closure;
-    app->position_timer = 0;
-    cerr << "Line: " << app->save_pos.line_number <<
-      " Column: " << (app->save_pos.column_number + 1) << "     \r";
-  }
-
-  /// テキスト位置が変化したタイミングで呼び出される
-  static void position_callback(Widget widget, XtPointer client_data, XtPointer call_data) {
-    XawTextPositionInfo *pos = (XawTextPositionInfo *)call_data;
-    text_app *app = (text_app *)client_data;
-
-    if (0)
-      cerr << XtName(widget) << " position callback" << endl;
-
-    app->save_pos = *pos;
-    if (app->position_timer)
-      XtRemoveTimeOut(app->position_timer);
-
-    app->position_timer = 
-      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
-		      app->position_interval, show_potision_proc, app);
-  }
-
-  void text_app::create_contents(Widget top) {
-    Widget pane = 
-      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
-    Widget menu_bar = 
-      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
-
-    XtVaCreateManagedWidget("memo", menuButtonWidgetClass, menu_bar, 
-			    XtNmenuName, "memo-menu", 
-			    NULL);
-    buf = 
-      XtVaCreateManagedWidget("buf", asciiTextWidgetClass, pane, 
-			      XtNeditType, XawtextEdit, 
-			      XtNtype, XawAsciiString,
-			      XtNwrap, XawtextWrapWord,
-			      XtNscrollVertical, XawtextScrollWhenNeeded, // or XawtextScrollAlways,
-			      NULL);
-
-    XtAddCallback(buf, XtNpositionCallback, position_callback, this);
-
-    Widget close = 
-      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
-    XtAddCallback(close, XtNcallback, quit_application, 0);
-    XtInstallAccelerators(buf, close);
-
-    struct Menu_Item submenu[] = {
-      { "item1", menu_selected, },
-      { "item2", menu_selected, },
-      { "item3", menu_selected, },
-      { 0, },
-    };
-
-    //create_popup_menu("memo-submenu", top, submenu);
-
-    struct Menu_Item items[] = {
-      { "select-all", select_all_text_proc, this, },
-      { "delete-selection", delete_selection_text_proc, this, },
-      { "hello", append_hello_text_proc, this, },
-      { "fetch-text", fetch_text_proc, this, },
-      { "now", insert_datetime_text_proc, buf, },
-      { "goto-line", open_goto_list_dialog_proc, this, },
-      { "sub-menu", 0, 0, submenu },
-      { "-", },
-      { "close", quit_application, },
-      { 0, },
-    };
-
-    create_popup_menu("memo-menu", top, items);
-
-    struct Menu_Item shortcut_item[] = {
-      { "aaa", menu_selected, },
-      { "bbb", menu_selected, },
-      { "fetch-text", fetch_text_proc, this, },
-      { "sub-menu", 0, 0, submenu },
-      { "-", },
-      { "close", quit_application, },
-      { 0, },
-    };
-
-    create_popup_menu("text-shortcut", top, shortcut_item);
-
-#if 1
-    status = 
-      XtVaCreateManagedWidget("status", asciiTextWidgetClass, pane, 
-			      XtNscrollHorizontal, XawtextScrollNever,
-			      XtNdisplayCaret, False,
-			      XtNskipAdjust, True, NULL);
-#endif
-
-    XtRealizeWidget(top);
-    show_component_tree(top);
-
-    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
-
-    XtAddEventHandler(top, NoEventMask, True, dispose_handler, 0);
-    XSetWMProtocols(XtDisplay(top), XtWindow(top), &WM_DELETE_WINDOW, 1 );
-
-    XtAddCallback(top, XtNdestroyCallback, delete_app_proc, this);
-  }
-
-  /// 処理するイベントがなくなった時に呼び出される
-  static Boolean text_ready(XtPointer closure) {
-    text_app *app = (text_app *)closure;
-
-    cerr << "TRACE: work proc called" << endl;
-
-    wstring wtext = xwin::load_wtext(__FILE__);
-
-    append_text(app->buf, wtext.c_str(), wtext.size());
-
-    // 時刻表示のタイマーを登録
-    app->timer = 
-      XtAppAddTimeOut(XtWidgetToApplicationContext(app->status),
-		      app->interval, show_time_proc, app);
-    return True;
-  }
-
-  /** 簡易テキストエディタ。
-      ボタンを組み合わせたメニュー付き。
-  */
-  static int awt_editor(int argc, char **argv) {
-
-    static String app_class = "AwText", 
-      fallback_resouces[] = { 
-      "*international: True",
-      "*inputMethod: kinput2",
-      "*fontSet: -*-*-*-*-*--24-*",
-      "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
-      "*preeditType: OverTheSpot,OffTheSpot,Root",
-      "*cursorColor: red",
-
-      "*buf.width: 500",
-      "*buf.height: 300",
-      "*buf.textSource.enableUndo: True",
-      "*sub-menu.menuName: memo-submenu",
-
-      "*Text.translations: #override "
-      "Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
-      "Ctrl<Key>Right: forward-word()\\n"
-      "Ctrl<Key>Left: backward-word()\\n"
-      "Ctrl<Key>space: select-start()\\n"
-      "Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
-      "<Key>Home: beginning-of-file()\\n"
-      "<Key>End: end-of-file()\\n"
-      "<Key>Next: next-page()\\n"
-      "<Key>Prior: previous-page()\\n",
-
-      "*buf.translations: #override "
-      " Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
-      " Ctrl<Key>Right: forward-word()\\n"
-      " Ctrl<Key>Left: backward-word()\\n"
-      " Ctrl<Key>space: select-start()\\n"
-      " Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
-      " <Key>Home: beginning-of-file()\\n"
-      " <Key>End: end-of-file()\\n"
-      " <Key>Next: next-page()\\n"
-      " <Key>Prior: previous-page()\\n"
-      " Shift<Btn4Down>,<Btn4Up>: scroll-one-line-down()\\n"
-      " Shift<Btn5Down>,<Btn5Up>: scroll-one-line-up()\\n"
-      " Ctrl<Btn4Down>,<Btn4Up>: previous-page()\\n"
-      " Ctrl<Btn5Down>,<Btn5Up>: next-page()\\n"
-      " <Btn4Down>,<Btn4Up>:scroll-one-line-down()scroll-one-line-down()scroll-one-line-down()"
-        "scroll-one-line-down()scroll-one-line-down()\\n"
-      " <Btn5Down>,<Btn5Up>:scroll-one-line-up()scroll-one-line-up()scroll-one-line-up()"
-        "scroll-one-line-up()scroll-one-line-up()\\n"
-      " Ctrl<Key>F2: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
-      " Ctrl<Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
-      " Ctrl<Btn3Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
-      ,
-#if 0
-      " <Btn3Down>: XawPositionSimpleMenu(text-shortcut) MenuPopup(text-shortcut)\\n"
-      " !Ctrl <Btn3Down>: XawPositionSimpleMenu(text-shortcut) MenuPopup(text-shortcut)\\n"
-      " !Lock Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
-#else
-      "*menu_bar.translations: #override "
-      " <Btn3Down>: popup-shortcut(text-shortcut)\\n"
-      " Ctrl <Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
-      " Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
-      " !Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
-      " !Lock Ctrl <Btn3Down>: popup-shortcut(text-shortcut)\\n"
-#endif
-      ,
-      "*.jump.accelerators: <KeyPress>Return: set() notify() unset()\\n",
-      "*.cancel.accelerators: <KeyPress>Escape: set() notify() unset()\\n",
-      "*.close.accelerators: #override Ctrl<KeyPress>w: set() notify() unset()\\n",
-      NULL,
-    };
-
-    XtActionsRec actions[] = {
-      { "popup-shortcut", popup_action, },
-    };
-    XtAppContext context;
-    XtSetLanguageProc(NULL, NULL, NULL);
-
-    Widget top = 
-      XtVaAppInitialize(&context, app_class, NULL, 0,
-			&argc, argv, fallback_resouces, NULL);
-
-    XawSimpleMenuAddGlobalActions(context);
-
-    XtRegisterGrabAction(popup_action, True, 
-			 ButtonPressMask | ButtonReleaseMask ,
-			 GrabModeAsync, GrabModeAsync);
-
-    XtAppAddActions(context, actions, XtNumber(actions));
-    xatom_initialize(XtDisplay(top));
-    text_app *app = new text_app;
-    app->create_contents(top);
-
-    XtWorkProcId work = XtAppAddWorkProc(context, text_ready, app);
-    cerr << "TRACE: ready proc: " << app << ":" << work << endl;
-    cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
-    return app->main_loop(context);
-  }
-
-};
-
-/*
-  Xlibがサポートするロケールと libcがサポートするロケールが合致していないと
-  エディタはうまく動作しない。
-
-  CentOS5.x で提供される ja_JP.utf8 はXlibがサポートしていない。
-  一見動作しているようだが、処理中に バッファオーバフローが検出されて停止してしまう。
-
-  この問題を回避するために
-  # localedef -f EUC-JP -i ja_JP /usr/lib/locale/ja_JP.eucJP
-  として、ja_JP.eucJP を定義して、これを利用する必要がある。
-  
- */
-
 // --------------------------------------------------------------------------------
 
 #include "subcmd.h"
@@ -2225,10 +1656,7 @@ subcmd awt_cmap[] = {
   { "top", onlytop, },
   { "win03", onlytop, },
   { "multi", awt_multi_apps, },
-  { "hello02", awt_hello, },
   { "dialog02", awt_dialog02, },
-  { "list", awt_list, },
-  { "edit", awt_editor, },
   { "awt", awt_app01, },
   { 0 },
 };
