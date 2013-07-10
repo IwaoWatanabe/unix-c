@@ -11,6 +11,7 @@
 #include <string>
 #include <map>
 #include <vector>
+#include <iostream>
 
 using namespace std;
 
@@ -322,7 +323,7 @@ static int map01(int argc, char **argv) {
    */
 
   char nbuf[100];
-  int bb[] = { 3, 1, 4, 1, 5, 9, 2, };
+  int bb[] = { 200, 300, 3, 1, 4, 400, 1, 5, 9, 2, };
   for (int i = 0, n = sizeof bb/sizeof bb[0]; i < n; i++) {
     string cc(nbuf, (size_t)snprintf(nbuf, sizeof nbuf, "text%03d",bb[i]));
     aa.insert(map<int,string>::value_type(bb[i], cc));
@@ -357,8 +358,116 @@ static int map01(int argc, char **argv) {
     文字列の場合は 空テキスト。
    */
 
+  map<int,string>::iterator it = aa.begin();
+  while (it != aa.end()) {
+    /*
+      マップを走査して、ある条件の要素を削除する例
+     */
+    if (it->first > 10) { // キーが10以上のエントリを削除する
+      aa.erase(it++);
+      continue;
+      /*
+	eraseすると、その対象を示す it が無効になるため、
+	eraseする前に it をインクリメントするように
+	後置インクリメントを利用する。
+      */
+    }
+    it++;
+  }
+
+
   show_map(aa);
   putchar('\n');
+}
+
+namespace {
+  /// Mapのキーとすることができるクラス
+  class Map_Key {
+    int key;
+  public:
+    Map_Key(int _key) : key(_key) { cerr << "key(ini):" << key << endl; }
+    Map_Key(const Map_Key &aa) : key(aa.key) { cerr << "key(copy):" << key << endl; }
+
+    /// 代入オペレータ
+    Map_Key& operator=(Map_Key &aa) { key = aa.key; cerr << "key(assign):" << key << endl; return *this; }
+
+    /// 整列に必要な比較オペレータ
+    bool operator< (const Map_Key &aa) const { return key < aa.key; }
+
+    /// テキストに変換
+    string text() const { char dbuf[20]; snprintf(dbuf,sizeof dbuf, "%d",key); return dbuf; }
+  };
+
+  /// Mapの値とすることができるクラス
+  class Map_Value {
+    int value;
+  public:
+    /// デフォルト・コンストラクタが必要（キーが無いときにこれで初期化する）
+    Map_Value() : value(0) { cerr << "value(def):" << value << endl; }
+    Map_Value(int tt) : value(tt) { cerr << "value(ini):" << value << endl; }
+
+    /// コピー・コンストラクタが必要（コンテナに格納するときの複製で利用）
+    /// （メンバが基本型だけで構成されているなら不要）
+    Map_Value(const Map_Value &aa) : value(aa.value) { cerr << "value(copy):" << value << endl; }
+
+    /// 代入オペレータは必要？
+    Map_Value& operator=(Map_Value &aa) { value = aa.value; cerr << "value(assign):" << value << endl; return *this; }
+
+    void set_value(int t) { value = t; }
+
+    /// テキストに変換
+    string text() const { char dbuf[20]; snprintf(dbuf,sizeof dbuf, "%d",value); return dbuf; }
+  };
+};
+
+/// 要素の内容を出力する
+
+static void show_map(map<Map_Key,Map_Value> &aa, const char *sep = ", ") {
+
+  map<Map_Key,Map_Value>::iterator it = aa.begin();
+  const char *xsep = "";
+  for (; it != aa.end(); it++) {
+    printf("%s%s:%s", xsep, it->first.text().c_str(), it->second.text().c_str());
+    xsep = sep;
+    /*
+      イテレータで走査して要素を出力する。
+     */
+  }
+  puts("");
+}
+
+/**
+  検索キーとその値を組で保持するコンテナ。
+*/
+static int map02(int argc, char **argv) {
+
+  Map_Key xa(123);
+  Map_Value ya(56789);
+
+  Map_Key xb(xa);
+  Map_Value yb(ya);
+
+  printf("key: %s\n", xa.text().c_str());
+  printf("value: %s\n", ya.text().c_str());
+
+  printf("key: %s\n", xb.text().c_str());
+  printf("value: %s\n", yb.text().c_str());
+
+
+  map<Map_Key,Map_Value> aa;
+
+  int bb[] = { 200, 300, 3, 1, 4, 400, 1, 5, 9, 2, };
+
+  for (int i = 0, n = sizeof bb/sizeof bb[0]; i < n; i++) {
+    aa.insert(map<Map_Key, Map_Value>::value_type(Map_Key(bb[i]), Map_Value(bb[i] * 10)));
+    /*
+      要素を追加する。
+    */
+  }
+
+  show_map(aa);
+
+  return 0;
 }
 
 
@@ -441,6 +550,7 @@ subcmd stl_cmap[] = {
   { "stl-vec01", vector01 },
   { "stl-set01", set01 },
   { "stl-map01", map01 },
+  { "stl-map02", map02 },
   { 0 },
 };
 
