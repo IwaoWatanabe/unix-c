@@ -7,9 +7,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <list>
+#include <map>
 #include <set>
 #include <string>
-#include <map>
 #include <vector>
 #include <iostream>
 
@@ -540,6 +541,127 @@ static int set01(int argc, char **argv) {
 
 // --------------------------------------------------------------------------------
 
+/// 要素の内容を出力する
+
+static void show_list(list<int> &aa, const char *sep = ", ") {
+  list<int>::iterator it = aa.begin();
+  const char *xsep = "";
+  for (; it != aa.end(); it++) {
+    printf("%s%d", xsep, *it);
+    xsep = sep;
+    /*
+      イテレータで走査して要素を出力する。
+     */
+  }
+}
+
+/// std::list の振る舞いの確認
+/**
+  双方向連携リストアルゴリズムで要素を格納するコンテナ。
+  ランダムアクセスができない変わりに、要素途中の挿入と削除が速い。
+  要素を追加すると自動的に領域を拡張する。
+*/
+static int list01(int argc, char **argv) {
+  list<int> aa;
+
+  printf("empty:%d\n", aa.empty() ? 1 : 0);
+  /*
+    生成した直後は空判定で true となる。
+   */
+
+  int bb[] = { 3, 1, 4, 1, 5, 9, 2, };
+  for (int i = 0, n = sizeof bb/sizeof bb[0]; i < n; i++) {
+    aa.push_back(bb[i]);
+    /*
+      末尾に要素を追加する。
+    */
+  }
+
+  printf("size:%d\n", aa.size());
+  /*
+    要素数を入手する。
+   */
+
+  int cc = 10;
+  list<int>::iterator pos = find(aa.begin(), aa.end(), cc);
+  /*
+    algorithm で定義される find を使って要素の場所を探す。
+    find には、探索範囲(イテレータ)と、要素を渡す。
+    見付からなければ end が返る。
+   */
+  if (pos == aa.end())
+    printf("%d not found.\n", cc);
+
+  cc = 5;
+
+  pos = find(aa.begin(), aa.end(), cc);
+  if (pos != aa.end()) {
+    list<int>::iterator next_pos = aa.erase(pos);
+    /*
+      eraseは削除した要素の次の要素の位置を返す。
+     */
+    printf("%d erased.\n", cc);
+  }
+  /*
+    場所(イテレータ)を指定してerase で削除する。
+    その場所以後の要素は詰まってくるため、
+    先頭付近での操作は処理に時間がかかる。
+   */
+
+  int bb2[] = { 1, 2, 3, 4, 5, };
+  for (int i = 0, n = sizeof bb2/sizeof bb2[0]; i < n; i++) {
+    list<int>::iterator pos = aa.begin();
+    aa.insert(pos, bb2[i]);
+    /*
+      位置を指定して登録する。
+      この例では、先頭に追加している。
+    */
+  }
+  show_list(aa);
+  putchar('\n');
+
+  aa.sort();
+  /*
+    整列するメソッドがある
+   */
+  show_list(aa);
+  putchar('\n');
+
+  list<int>::iterator min01, max02;
+  min01 = min_element(aa.begin(), aa.end());
+  max02 = max_element(aa.begin(), aa.end());
+  printf("min:%d max:%d\n", *min01, *max02);
+
+  reverse(aa.begin(), aa.end());
+  show_list(aa);
+  putchar('\n');
+
+
+  list<int> dd;
+  copy(aa.begin(), aa.end(), back_inserter(dd));
+  /*
+    ddの末尾に追記する
+   */
+  show_list(dd);
+  putchar('\n');
+
+  transform(aa.begin(), aa.end(), back_inserter(dd), pow2);
+  /*
+    ddの末尾に加工した値を追記する
+   */
+  show_list(dd);
+  putchar('\n');
+
+
+  aa.clear();
+  /*
+    要素をクリアする
+   */
+  printf("size:%d\n", aa.size());
+}
+
+// --------------------------------------------------------------------------------
+
 #include "subcmd.h"
 
 subcmd stl_cmap[] = {
@@ -551,6 +673,7 @@ subcmd stl_cmap[] = {
   { "stl-set01", set01 },
   { "stl-map01", map01 },
   { "stl-map02", map02 },
+  { "stl-list01", list01 },
   { 0 },
 };
 
