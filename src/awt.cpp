@@ -72,33 +72,6 @@ extern "C" {
   extern char *demangle(const char *demangle);
 };
 
-namespace {
-
-  /// トップレベル・ウィンドウだけ表示する
-  static int onlytop(int argc, char **argv) {
-
-    static String app_class = "OnlyTop",
-      fallback_resouces[] = { "*geometry: 120x100", 0, };
-    /*
-      fallbackのアドレスは、スタック上に作成してはいけないため、
-      グローバル変数とするか、static　修飾を指定すること。
-    */
-    
-    static XrmOptionDescRec options[] = {};
-    XtAppContext context;
-    Widget top_level_shell =
-      XtVaAppInitialize(&context, app_class, options, XtNumber(options),
-			&argc, argv, fallback_resouces, NULL);
-
-    XtRealizeWidget(top_level_shell);
-    show_component_tree(top_level_shell);
- 
-    XtAppMainLoop(context);
-    return 0;
-  }
-
-};
-
 
 // --------------------------------------------------------------------------------
 
@@ -122,7 +95,7 @@ namespace xwin {
     const char *description;
   };
 
-  /// GUIアプリケーション・コードが作成するインタフェース
+  /// GUIユーザ・コードが実装するインタフェース
   struct Frame {
     virtual ~Frame() = 0;
     /// コンテナ・リソースを参照するためのコンテキストが渡されてくる
@@ -199,7 +172,7 @@ namespace {
   class Simple_Frame : public Frame { };
 
   /// 空フレームの生成クラス
-  class Simple_Frame_Factory : Frame_Factory {
+  class Simple_Frame_Factory : public Frame_Factory {
     Frame *get_instance() { return new Simple_Frame(); }
   };
 };
@@ -501,7 +474,7 @@ namespace {
   };
 
   /// ラベルだけ・フレームの生成クラス
-  class Message_Frame_Factory : Frame_Factory {
+  class Message_Frame_Factory : public Frame_Factory {
     Frame *get_instance() { return new Message_Frame(); }
   };
 
@@ -559,7 +532,7 @@ namespace {
   };
 
   /// ボタン・フレームの生成クラス
-  class Button_Frame_Factory : Frame_Factory {
+  class Button_Frame_Factory : public Frame_Factory {
     Frame *get_instance() { return new Button_Frame(); }
   };
 
@@ -618,7 +591,7 @@ namespace {
     Widget create_contents(Widget shell);
   };
 
-  class Dialog_Button_Frame_Factory : Frame_Factory {
+  class Dialog_Button_Frame_Factory : public Frame_Factory {
     Frame *get_instance() { return new Dialog_Button_Frame(); }
   };
 
@@ -660,7 +633,7 @@ namespace {
     Widget create_contents(Widget shell);
   };
 
-  class Class_Tree_Factory : Frame_Factory {
+  class Class_Tree_Factory : public Frame_Factory {
     Frame *get_instance() { return new Class_Tree(); }
   };
 
@@ -843,7 +816,7 @@ namespace {
     Widget create_contents(Widget shell);
   };
 
-  class Folder_List_Factory : Frame_Factory {
+  class Folder_List_Factory : public Frame_Factory {
     Frame *get_instance() { return new Folder_List(); }
   };
 
@@ -971,7 +944,7 @@ namespace {
     Widget create_contents(Widget shell);
   };
 
-  class Editor_Frame_Factory : Frame_Factory {
+  class Editor_Frame_Factory : public Frame_Factory {
     Frame *get_instance() { return new Editor_Frame(); }
   };
 
@@ -1327,16 +1300,47 @@ namespace {
   /// Athena Widget Set を使うアプリケーションコンテナの利用開始
   static int awt_app01(int argc, char **argv) {
 
-    Simple_Frame_Factory aa01;
-    Message_Frame_Factory aa02;
-    Button_Frame_Factory aa03;
-    Dialog_Button_Frame_Factory a04;
-    Class_Tree_Factory aa05;
-    Folder_List_Factory aa06;
-    Editor_Frame_Factory aa07;
+    struct { char *name; Frame_Factory *ff; } fflist[] = {
+      { "top", new Simple_Frame_Factory(), },
+      { "message", new Message_Frame_Factory(), },
+      { "button", new Button_Frame_Factory(), },
+      { "dialog", new Dialog_Button_Frame_Factory(), },
+      { "ctree", new Class_Tree_Factory(), },
+      { "folder", new Folder_List_Factory(), },
+      { "memo", new Editor_Frame_Factory(), },
+    };
+
+    Frame_Factory *ff = 0;
+    const char *app_class = 0;
+
+    vector<Frame_Factory *>::iterator it = frame_factories.begin();
+    for (; it != frame_factories.end(); it++) {
+      ff = *it;
+
+      const char *name = ff->get_class_name();
+      if (!name) {
+	name = demangle(typeid(*ff).name());
+	const char *p;
+	while ((p = strstr(name,"::"))) { name = p + 2; }
+      }
+
+      /// 取りあえずファクトリ名とバージョンを表示してみる
+      printf("factory: %s: %s\n", name, ff->get_version());
+    }
+
+    elog(I, "%d factories declared.\n", frame_factories.size());
+
+    if (!ff) return 1;
+
+    for (int i = 0, n = XtNumber(fflist); i < n; i++) {
+      if (strcasecmp(fflist[i].name, argv[0]) == 0) ff = fflist[i].ff;
+    }
+
+    // ここまでで、利用する Factoryが決まる。
 
     static String fallback_resouces[] = {
       "Simple_Frame_Factory.geometry: 300x200",
+      "Message_Frame_Factory.geometry: 300x200",
       "Dialog_Button_Frame_Factory.geometry: 300x200",
       "Button_Frame_Factory.geometry: 300x200",
       "Class_Tree_Factory.geometry: 800x400",
@@ -1449,44 +1453,35 @@ namespace {
       "*.close.accelerators: #override Ctrl<KeyPress>w: set() notify() unset()\\n",
       0,
     };
+    /*
+      fallbackのアドレスは、スタック上に作成してはいけないため、
+      グローバル変数とするか、static　修飾を指定すること。
+    */
 
     XtAppContext context;
+    Widget top_level_shell;
+
+    XtSetLanguageProc(NULL, NULL, NULL);
 
     // アプリケーション追加オプションの様式定義
     static XrmOptionDescRec options[] = {
       { "-msg", ".Message", XrmoptionSepArg, NULL, },
     };
 
-    Widget top_level_shell;
-
-    XtSetLanguageProc(NULL, NULL, NULL);
-
     static XtActionsRec actions[] = {
       { "change-item", change_item_action, },
       { "popup-shortcut", popup_action, },
     };
 
-    Frame_Factory *ff = 0;
-    const char *app_class = "";
-
-    vector<Frame_Factory *>::iterator it = frame_factories.begin();
-    for (; it != frame_factories.end(); it++) {
-      ff = *it;
-
-      app_class = ff->get_class_name();
-      if (!app_class) {
-	const char *name = demangle(typeid(*ff).name());
+    {
+      const char *cname = ff->get_class_name();
+      if (!cname) {
+	cname = demangle(typeid(*ff).name());
 	const char *p;
-	while ((p = strstr(name,"::"))) { name = p + 2; }
-	app_class = name;
+	while ((p = strstr(cname,"::"))) { cname = p + 2; }
       }
-
-      /// 取りあえずファクトリ名とバージョンを表示してみる
-      printf("factory: %s: %s\n", app_class, ff->get_version());
+      app_class = strdup(cname);
     }
-    elog(I, "%d factories declared.\n", frame_factories.size());
-
-    if (!ff) return 1;
 
     top_level_shell =
       XtVaAppInitialize(&context, app_class, options, XtNumber(options),
@@ -1510,6 +1505,10 @@ namespace {
     XtDestroyApplicationContext(context);
     cerr << "TRACE: context destroyed." << endl;
 
+    {
+      vector<Frame_Factory *>::iterator it = frame_factories.begin();
+      for (; it != frame_factories.end();it++) { delete *it; }
+    }
     return 0;
   }
 
@@ -1653,10 +1652,14 @@ namespace {
 #include "subcmd.h"
 
 subcmd awt_cmap[] = {
-  { "top", onlytop, },
-  { "win03", onlytop, },
+  { "top", awt_app01, },
   { "multi", awt_multi_apps, },
+  { "message", awt_app01, },
+  { "dialog", awt_app01, },
   { "dialog02", awt_dialog02, },
+  { "ctree", awt_app01, },
+  { "folder", awt_app01, },
+  { "memo", awt_app01, },
   { "awt", awt_app01, },
   { 0 },
 };
