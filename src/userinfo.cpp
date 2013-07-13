@@ -399,13 +399,14 @@ namespace uc {
 };
 
 #include <cctype>
+#include <memory>
 
 enum { I = uc::ELog::I };
 
 /// ユーザ・エントリの検索
 static int getpwent01(int argc, char **argv) {
 
-  uc::User_Info *ent = uc::User_Info::create_instance();
+  auto_ptr <uc::User_Info> ent(uc::User_Info::create_instance());
   int rc = 0;
 
   optind = 1;
@@ -422,7 +423,6 @@ static int getpwent01(int argc, char **argv) {
     }
 
     elog(I, "%d user entries\n", ent->endpwent());
-    ent->release();
 
     return rc;
   }
@@ -447,8 +447,6 @@ static int getpwent01(int argc, char **argv) {
     }
   }
 
-  ent->release();
-
   return rc;
 }
 
@@ -456,7 +454,7 @@ static int getpwent01(int argc, char **argv) {
 /// グループ・エントリの検索
 static int getgrent01(int argc, char **argv) {
 
-  uc::User_Info *ent = uc::User_Info::create_instance();
+  auto_ptr<uc::User_Info> ent(uc::User_Info::create_instance());
   int rc = 0;
 
   optind = 1;
@@ -473,8 +471,6 @@ static int getgrent01(int argc, char **argv) {
     }
 
     elog(I, "%d group entries\n", ent->endgrent());
-
-    delete ent;
 
     return rc;
   }
@@ -498,8 +494,6 @@ static int getgrent01(int argc, char **argv) {
       break;
     }
   }
-
-  delete ent;
 
   return rc;
 }
