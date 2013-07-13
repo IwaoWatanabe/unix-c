@@ -94,7 +94,7 @@ namespace xwin {
   Frame::~Frame() { }
 
   /// 一連のファクトリを記録する
-  static vector<Frame_Factory *> frame_factories;
+  vector<Frame_Factory *> frame_factories;
 
   Frame_Factory::Frame_Factory() { frame_factories.push_back(this); }
 

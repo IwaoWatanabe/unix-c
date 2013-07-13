@@ -13,6 +13,8 @@
 #include <X11/Xmu/Editres.h>
 
 #include "xt-proc.h"
+#include "uc/elog.hpp"
+
 #include <Mrm/MrmPublic.h>
 
 #include <Xm/CascadeB.h>
@@ -33,12 +35,23 @@
 #include <Xm/Text.h>
 
 using namespace std;
+using namespace xwin;
 
 extern wstring load_wtext(const char *path, const char *encoding = "UTF-8", time_t *lastmod = 0, size_t buf_len = 4096);
 
-namespace xwin {
-extern bool load_dirent(const char *dirpath, vector<string> &entries, bool with_hidden_file = false);
+extern "C" {
+  extern char *trim(char *t);
+  extern char *demangle(const char *demangle);
 };
+
+namespace xwin {
+  extern bool load_dirent(const char *dirpath, vector<string> &entries, bool with_hidden_file = false);
+
+  /// 一連のファクトリを記録する
+  extern vector<Frame_Factory *> frame_factories;
+};
+
+// --------------------------------------------------------------------------------
 
 namespace {
 
@@ -48,53 +61,35 @@ namespace {
     cerr << "TRACE: quit application called." << endl;
   }
 
-  /// メッセージを出現させる
-  static int motif_hello(int argc, char **argv) {
-    static String app_class = "HelloMotif", 
-      fallback_resouces[] = { 
-      "*fontList: -*-*-*-*-*--16-*:",
-      "*msg.labelString: Welcome to Motif World. 日本語も表示できます",
-      "HelloMotif.geometry: 300x200",
-      NULL,
-    };
-    
-    static XrmOptionDescRec options[] = { };
-    
-    XtAppContext context;
 
-    Widget top = 
-      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
-			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
+  /// ボタンを表示するだけのフレーム
+  class Hello_Frame : public Frame {
+  public:
+    Widget create_contents(Widget shell);
+  };
 
+  class Hello_Frame_Factory : public Frame_Factory {
+    Frame *get_instance() { return new Hello_Frame(); }
+  };
+
+  Widget Hello_Frame::create_contents(Widget top) {
     Widget pb = XmVaCreateManagedPushButton(top,"msg",NULL);
-
 #if 0
     XtVaSetValues(pb, XmNlabelString, XmStringCreateLocalized("日本語テキスト"), NULL);
 #endif
     XtAddCallback(pb, XmNactivateCallback, quit_application, NULL);
-    XtRealizeWidget(top);
-
-    XtAppMainLoop(context);
-    XtDestroyApplicationContext(context);
-    cerr << "TRACE: context destroyed." << endl;
     return 0;
   }
+
 };
+
 
 // --------------------------------------------------------------------------------
 
 namespace {
 
-  /// メニュー・アイテムの登録準備
-  struct menu_item {
-    String name; ///< アイテム名
-    XtCallbackProc proc; ///< コールバック
-    XtPointer closure; ///< クライアント・データに渡す値
-    struct menu_item *sub_menu; ///< カスケード
-  };
-
   /// ポップアップ・メニューの作成(motif)
-  static Widget create_pulldown_menu(String menu_name, Widget parent, menu_item *items) {
+  static Widget create_pulldown_menu(String menu_name, Widget parent, Menu_Item *items) {
     Widget menu = XmCreatePulldownMenu(parent,menu_name,0,0);
 
     for (int i = 0; items[i].name; i++) {
@@ -139,7 +134,7 @@ namespace {
       XmCreateMenuBar(main,"bar",0,0);
     XtManageChild(bar);
 
-    struct menu_item dir_items[] = {
+    struct Menu_Item dir_items[] = {
       { "new", quit_application, },
       { "-", },
       { "close", quit_application, },
@@ -285,7 +280,7 @@ namespace {
       XmCreateMenuBar(main,"bar",0,0);
     XtManageChild(bar);
 
-    struct menu_item dir_items[] = {
+    struct Menu_Item dir_items[] = {
       { "close", quit_application, },
       { 0, },
     };
@@ -334,10 +329,28 @@ namespace {
     XtRealizeWidget(top);
   }
 
-  struct parts_app {
+  /// Motif の各種部品の振る舞いを確認する
+  class Parts_Frame : public Frame {
     Widget info, warn, err;
     Widget prompt, command, selection;
     Widget tree;
+
+    static void info_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void warn_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void err_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void prompt_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void command_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void selection_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+
+    static void tree_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void create_tree_test(Widget shell);
+
+  public:
+    Widget create_contents(Widget shell);
+  };
+
+  class Parts_Frame_Factory : public Frame_Factory {
+    Frame *get_instance() { return new Parts_Frame(); }
   };
 
   /// メニューアイテムを選択した時の処理
@@ -373,9 +386,9 @@ namespace {
   }
 
   /// 情報メッセージの出力
-  static void info_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Parts_Frame::info_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    parts_app *app = (parts_app *)client_data;
+    Parts_Frame *app = (Parts_Frame *)client_data;
 
     if (!app->info) {
       Widget shell = find_shell(widget, 0);
@@ -394,9 +407,9 @@ namespace {
   }
 
   /// 警告メッセージの出力
-  static void warn_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Parts_Frame::warn_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    parts_app *app = (parts_app *)client_data;
+    Parts_Frame *app = (Parts_Frame *)client_data;
 
     if (!app->warn) {
       Widget shell = find_shell(widget, 0);
@@ -429,9 +442,9 @@ namespace {
   }
 
   // エラー・メッセージの出力
-  static void err_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Parts_Frame::err_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    parts_app *app = (parts_app *)client_data;
+    Parts_Frame *app = (Parts_Frame *)client_data;
 
     if (!app->err) {
       Widget shell = find_shell(widget, 0);
@@ -473,9 +486,9 @@ namespace {
   }
 
   /// プロンプト・ダイアログ表示機能の選択
-  static void prompt_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Parts_Frame::prompt_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    parts_app *app = (parts_app *)client_data;
+    Parts_Frame *app = (Parts_Frame *)client_data;
 
     if (!app->prompt) {
       Widget shell = find_shell(widget, 0);
@@ -536,9 +549,9 @@ namespace {
   }
 
   /// コマンド・ダイアログ表示機能の選択
-  static void command_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Parts_Frame::command_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    parts_app *app = (parts_app *)client_data;
+    Parts_Frame *app = (Parts_Frame *)client_data;
 
     if (!app->command) {
       Widget shell = find_shell(widget, 0);
@@ -584,9 +597,9 @@ namespace {
     /// ワイドキャラクタで取り出す
   }
 
-  static void selection_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Parts_Frame::selection_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    parts_app *app = (parts_app *)client_data;
+    Parts_Frame *app = (Parts_Frame *)client_data;
 
     static char *months[] = {
       "January", "February", "March", "April", "May", "June", 
@@ -622,8 +635,7 @@ namespace {
   }
 
   /// ツリー表示のサンプル
-  static void create_tree_test(Widget shell) {
-    parts_app *app = new parts_app();
+  void Parts_Frame::create_tree_test(Widget shell) {
 
     Widget main, tree;
     main = XtVaCreateManagedWidget("main", xmMainWindowWidgetClass, shell, NULL);
@@ -631,7 +643,7 @@ namespace {
     Widget bar =
       XmCreateMenuBar(main,"bar",0,0);
 
-    struct menu_item tree_items[] = {
+    struct Menu_Item tree_items[] = {
       { "close", quit_application, },
       { 0, },
     };
@@ -695,7 +707,7 @@ namespace {
     XtRealizeWidget(shell);
   }
 
-  static void tree_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Parts_Frame::tree_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     String app_class = "Tree";
     Widget top = XtVaAppCreateShell(NULL, app_class, applicationShellWidgetClass, 
@@ -705,23 +717,22 @@ namespace {
   }
 
   /// パーツの振る舞いの確認
-  static void create_parts_test(Widget shell) {
-    parts_app *app = new parts_app();
+  Widget Parts_Frame::create_contents(Widget shell) {
 
     Widget row_column = XmVaCreateManagedRowColumn(shell,"row-column", NULL);
 
-    struct menu_item items[] = {
+    struct Menu_Item items[] = {
       { "none", menu_selected, },
       { "tree", tree_menu_selected, },
       { "list", list_menu_selected, },
       { "password-list", passwdlist_menu_selected, },
-      { "info", info_menu_selected, app, },
-      { "warning", warn_menu_selected, app, },
-      { "error", err_menu_selected, app, },
+      { "info", info_menu_selected, this, },
+      { "warning", warn_menu_selected, this, },
+      { "error", err_menu_selected, this, },
 
-      { "prompt", prompt_menu_selected, app, },
-      { "command", command_menu_selected, app, },
-      { "selection", selection_menu_selected, app, },
+      { "prompt", prompt_menu_selected, this, },
+      { "command", command_menu_selected, this, },
+      { "selection", selection_menu_selected, this, },
       { "quit", quit_application, },
     };
 
@@ -731,37 +742,6 @@ namespace {
       XtAddCallback(item, XmNactivateCallback, items[i].proc, items[i].closure);
     }
 
-    XtRealizeWidget(shell);
-  }
-
-  /// Motifのさまざまなウィジェットの振る舞いを確認する
-  static int motif_parts(int argc, char **argv) {
-    static String app_class = "MotifParts", 
-      fallback_resouces[] = { 
-      "*fontList: -*-*-*-*-*--16-*:",
-      "*tab-render.tabList: 20fu, +10fu, +10fu, +30fu, +30fu, +30fu",
-      "*tab-render.fontName: -*-*-*-*-*--16-*",
-      "*tab-render.fontType: FONT_IS_FONTSET",
-      NULL,
-    };
-
-    static XrmOptionDescRec options[] = { };
-    XtAppContext context;
-
-    XtSetLanguageProc(NULL, NULL, NULL);
-    Widget top = 
-      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
-			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
-    app_shell_count++;
-    
-    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
-
-    create_parts_test(top);
-    cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
-
-    XtAppMainLoop(context);
-    XtDestroyApplicationContext(context);
-    cerr << "TRACE: context destroyed." << endl;
     return 0;
   }
 
@@ -772,37 +752,54 @@ namespace {
 namespace {
 
   /// 素朴なテキストエディタ(Motif版)
-  struct mtext_app {
+  class Editor_Frame : public Frame {
     Widget buf, dialog;
+
+    static void copy_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void cut_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void paste_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void all_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void get_selected(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data);
+    static void open_file(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void open_file_dialog(Widget widget, XtPointer client_data, XtPointer call_data);
+
+  public:
+    Widget create_contents(Widget shell);
+  };
+
+  class Editor_Frame_Factory : public Frame_Factory {
+    Frame *get_instance() { return new Editor_Frame(); }
   };
 
   /// 選択した範囲をクリップボードに複製
-  static void copy_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Editor_Frame::copy_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     XmPushButtonCallbackStruct *cs = (XmPushButtonCallbackStruct *)call_data;
-    mtext_app *app = (mtext_app *)client_data;
+    Editor_Frame *app = (Editor_Frame *)client_data;
+
     XmTextCopy(app->buf, cs->event->xbutton.time);
     cerr << "TRACE: " << XtName(widget) << " copy selected." << endl;
   }
 
   /// 選択した範囲を削除して、クリップボードに複製
-  static void cut_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Editor_Frame::cut_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     XmPushButtonCallbackStruct *cs = (XmPushButtonCallbackStruct *)call_data;
-    mtext_app *app = (mtext_app *)client_data;
+    Editor_Frame *app = (Editor_Frame *)client_data;
     XmTextCut(app->buf, cs->event->xbutton.time);
     cerr << "TRACE: " << XtName(widget) << " cut selected." << endl;
   }
 
   /// カーソル位置にクリップボードの内容を複製
-  static void paste_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
-    mtext_app *app = (mtext_app *)client_data;
+  void Editor_Frame::paste_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
     XmTextPaste(app->buf);
     cerr << "TRACE: " << XtName(widget) << " paste selected." << endl;
   }
 
   /// すべての要素を選択した状態にする
-  static void all_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Editor_Frame::all_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     XmAnyCallbackStruct *cs = (XmAnyCallbackStruct *)call_data;
-    mtext_app *app = (mtext_app *)client_data;
+    Editor_Frame *app = (Editor_Frame *)client_data;
     XmTextPosition start = 0;
     XmTextPosition last = XmTextGetLastPosition(app->buf);
     XmTextSetSelection(app->buf, start, last, cs->event->xbutton.time);
@@ -810,9 +807,9 @@ namespace {
   }
 
   /// 選択された領域を入手する
-  static void get_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Editor_Frame::get_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     XmPushButtonCallbackStruct *cs = (XmPushButtonCallbackStruct *)call_data;
-    mtext_app *app = (mtext_app *)client_data;
+    Editor_Frame *app = (Editor_Frame *)client_data;
 
     wchar_t *wcs = XmTextGetSelectionWcs(app->buf);
     if (!wcs) {
@@ -875,16 +872,16 @@ namespace {
     }
   }
 
-  static void append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
-    mtext_app *app = (mtext_app *)client_data;
+  void Editor_Frame::append_hello_text_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
     wchar_t buf[] = L"Hello,world\n";
     append_text(app->buf, buf);
   }
 
   /// ファイルが選択された
-  static void open_file(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void Editor_Frame::open_file(Widget widget, XtPointer client_data, XtPointer call_data) {
     XmFileSelectionBoxCallbackStruct *cs = (XmFileSelectionBoxCallbackStruct *)call_data;
-    mtext_app *app = (mtext_app *)client_data;
+    Editor_Frame *app = (Editor_Frame *)client_data;
 
     char *filename = (char *)
       XmStringUnparse(cs->value,
@@ -914,9 +911,8 @@ namespace {
   }
 
   /// ファイルを選択してテキストを読み込む
-  static void open_file_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
-
-    mtext_app *app = (mtext_app *)client_data;
+  void Editor_Frame::open_file_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Editor_Frame *app = (Editor_Frame *)client_data;
     cerr << "TRACE: " << XtName(widget) << " open file dialog selected." << endl;
 
     if (!app->dialog) {
@@ -935,8 +931,7 @@ namespace {
   }
 
   /// テキスト・エディタのメイン・ウィンドウを作成する
-  static void create_editor(Widget shell) {
-    mtext_app *app = new mtext_app();
+  Widget Editor_Frame::create_contents(Widget shell) {
 
     Widget main =
       XmVaCreateManagedMainWindow(shell,"main", NULL);
@@ -945,29 +940,29 @@ namespace {
       XmCreateMenuBar(main,"bar",0,0);
     XtManageChild(bar);
 
-    app->buf = 
+    this->buf =
       XmVaCreateManagedText(main, "buf", 
 			    XmNeditMode, XmMULTI_LINE_EDIT,
 			    NULL);
 
-    XtVaSetValues(main, XmNworkWindow, app->buf, NULL);
+    XtVaSetValues(main, XmNworkWindow, this->buf, NULL);
 
-    struct menu_item memo_items[] = {
-      { "new", menu_selected, app, },
-      { "open-file-dialog", open_file_dialog, app, },
-      { "get-seleted", get_selected, app, },
-      { "hello", append_hello_text_proc, app, },
-      { "now", insert_datetime_text_proc, app->buf, },
+    struct Menu_Item memo_items[] = {
+      { "new", menu_selected, this, },
+      { "open-file-dialog", open_file_dialog, this, },
+      { "get-seleted", get_selected, this, },
+      { "hello", append_hello_text_proc, this, },
+      { "now", insert_datetime_text_proc, this->buf, },
       { "-", menu_selected, },
       { "close", quit_application, },
       { 0, },
     };
 
-    struct menu_item edit_items[] = {
-      { "copy-to-cripboard", copy_selected, app, },
-      { "yank-from-cripboard", paste_selected, app, },
-      { "delete-selected", cut_selected, app, },
-      { "all-selected", all_selected, app, },
+    struct Menu_Item edit_items[] = {
+      { "copy-to-cripboard", copy_selected, this, },
+      { "yank-from-cripboard", paste_selected, this, },
+      { "delete-selected", cut_selected, this, },
+      { "all-selected", all_selected, this, },
       { 0, },
     };
 
@@ -978,37 +973,6 @@ namespace {
     XmVaCreateManagedCascadeButton(bar, "edit",
 				   XmNsubMenuId, create_pulldown_menu("edit", bar, edit_items),
 				   NULL);
-    XtRealizeWidget(shell);
-  }
-
-  /// テキストエディタ
-  static int motif_edit(int argc, char **argv) {
-    static String app_class = "MotifTextEditor", 
-      fallback_resouces[] = { 
-      "*fontList: -*-*-*-*-*--16-*:",
-      "*buf.columns: 30",
-      "*buf.rows: 15",
-      //    "MotifTextEditor.geometry: 300x200",
-      NULL,
-    };
-
-    static XrmOptionDescRec options[] = { };
-
-    XtAppContext context;
-
-    XtSetLanguageProc(NULL, NULL, NULL);
-    Widget top = 
-      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
-			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
-    app_shell_count++;
-
-    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
-    create_editor(top);
-    cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
-
-    XtAppMainLoop(context);
-    XtDestroyApplicationContext(context);
-    cerr << "TRACE: context destroyed." << endl;
     return 0;
   }
 
@@ -1139,13 +1103,195 @@ namespace {
 
 // --------------------------------------------------------------------------------
 
+namespace {
+
+  enum Error_Level { F, E, W, N, I, A, D, T };
+
+  /// サーバリソース管理の実装クラス
+  class Server_Resource_Impl : public Server_Resource {
+  public:
+    Server_Resource_Impl(Widget owner);
+    ~Server_Resource_Impl();
+
+    Atom atom_value_of(const char *name);
+    std::string text_of(Atom atom);
+
+    void open_frame(Frame *frame);
+
+    static void dispose_handler(Widget widget, XtPointer closure,
+				XEvent *event, Boolean *continue_to_dispatch);
+
+    static void delete_frame_proc( Widget widget, XtPointer client_data, XtPointer call_data);
+  };
+
+  Server_Resource_Impl::Server_Resource_Impl(Widget shell)
+    : Server_Resource(shell)
+  {
+    WM_PROTOCOLS = atom_value_of("WM_PROTOCOLS");
+    WM_DELETE_WINDOW = atom_value_of("WM_DELETE_WINDOW");
+    COMPOUND_TEXT = atom_value_of("COMPOUND_TEXT");
+  }
+
+  Server_Resource_Impl::~Server_Resource_Impl() { }
+
+  Atom Server_Resource_Impl::atom_value_of(const char *name) {
+    return XInternAtom(XtDisplay(owner), name, True);
+  }
+
+  string Server_Resource_Impl::text_of(Atom atom) {
+    return XGetAtomName(XtDisplay(owner), atom);
+  }
+
+  void Server_Resource_Impl::open_frame(Frame *frame) {
+    frame->create_contents(owner);
+    XtRealizeWidget(owner);
+
+    XtAddEventHandler(owner, NoEventMask, True, dispose_handler, this);
+    XtAddEventHandler(owner, NoEventMask, True, _XEditResCheckMessages, NULL);
+
+    XSetWMProtocols(XtDisplay(owner), XtWindow(owner), &WM_DELETE_WINDOW, 1 );
+    /*
+      DELETEメッセージを送信してもらうように
+      ウィンドウ・マネージャに依頼している
+     */
+
+    XtAddCallback(owner, XtNdestroyCallback, delete_frame_proc, frame);
+  }
+
+  /// WMからウインドウを閉じる指令を受け取った時の処理
+  void Server_Resource_Impl::dispose_handler(Widget widget, XtPointer closure,
+			      XEvent *event, Boolean *continue_to_dispatch) {
+
+    Server_Resource *sr = (Server_Resource *)closure;
+    switch(event->type) {
+    default: return;
+    case ClientMessage:
+      if (event->xclient.message_type == sr->WM_PROTOCOLS &&
+	  event->xclient.format == 32 &&
+	  (Atom)*event->xclient.data.l == sr->WM_DELETE_WINDOW) {
+	dispose_shell(widget);
+      }
+    }
+  }
+
+  /// フレーム・インスタンスの破棄
+  void Server_Resource_Impl::delete_frame_proc( Widget widget, XtPointer client_data, XtPointer call_data) {
+    Frame *fr = (Frame *)client_data;
+    if (fr) fr->release();
+    cerr << "TRACE: frame deleteing.. " << fr << endl;
+    delete fr;
+  }
+
+  /// Athena Widget Set を使うアプリケーションコンテナの利用開始
+  static int motif_app01(int argc, char **argv) {
+
+    struct { char *name; Frame_Factory *ff; } fflist[] = {
+      { "hello", new Hello_Frame_Factory(), },
+      { "motif-parts", new Parts_Frame_Factory(), },
+      { "motif-editor", new Editor_Frame_Factory(), },
+    };
+
+    Frame_Factory *ff = 0;
+    const char *app_class = 0;
+
+    vector<Frame_Factory *>::iterator it = frame_factories.begin();
+    for (; it != frame_factories.end(); it++) {
+      ff = *it;
+
+      const char *name = ff->get_class_name();
+      if (!name) {
+	name = demangle(typeid(*ff).name());
+	const char *p;
+	while ((p = strstr(name,"::"))) { name = p + 2; }
+      }
+
+      /// 取りあえずファクトリ名とバージョンを表示してみる
+      printf("factory: %s: %s\n", name, ff->get_version());
+    }
+
+    elog(I, "%d factories declared.\n", frame_factories.size());
+
+    if (!ff) return 1;
+
+    for (int i = 0, n = XtNumber(fflist); i < n; i++) {
+      if (strcasecmp(fflist[i].name, argv[0]) == 0) ff = fflist[i].ff;
+    }
+
+    // ここまでで、利用する Factoryが決まる。
+
+    static String fallback_resouces[] = {
+      "Hello_Frame.geometry: 300x200",
+      "*fontList: -*-*-*-*-*--16-*:",
+      "*msg.labelString: Welcome to Motif World. 日本語も表示できます",
+
+      "*fontList: -*-*-*-*-*--16-*:",
+
+      "*tab-render.tabList: 20fu, +10fu, +10fu, +30fu, +30fu, +30fu",
+      "*tab-render.fontName: -*-*-*-*-*--16-*",
+      "*tab-render.fontType: FONT_IS_FONTSET",
+
+      "*buf.columns: 30",
+      "*buf.rows: 15",
+
+      0,
+    };
+    /*
+      fallbackのアドレスは、スタック上に作成してはいけないため、
+      グローバル変数とするか、static　修飾を指定すること。
+    */
+
+    XtAppContext context;
+    Widget top_level_shell;
+
+    XtSetLanguageProc(NULL, NULL, NULL);
+
+    // アプリケーション追加オプションの様式定義
+    static XrmOptionDescRec options[] = { };
+    static XtActionsRec actions[] = { };
+
+    {
+      const char *cname = ff->get_class_name();
+      if (!cname) {
+	cname = demangle(typeid(*ff).name());
+	const char *p;
+	while ((p = strstr(cname,"::"))) { cname = p + 2; }
+      }
+      app_class = strdup(cname);
+    }
+
+    top_level_shell =
+      XtVaAppInitialize(&context, app_class, options, XtNumber(options),
+			&argc, argv, fallback_resouces, NULL);
+
+    XtAppAddActions(context, actions, XtNumber(actions));
+    Frame *fr = ff->get_instance();
+    printf("frame: %p: %s\n", fr, demangle(typeid(*fr).name()));
+
+    Server_Resource_Impl *sr = new Server_Resource_Impl(top_level_shell);
+    sr->open_frame(fr) ;
+
+    XtAppMainLoop(context);
+    XtDestroyApplicationContext(context);
+    cerr << "TRACE: context destroyed." << endl;
+
+    {
+      vector<Frame_Factory *>::iterator it = frame_factories.begin();
+      for (; it != frame_factories.end();it++) { delete *it; }
+    }
+    return 0;
+  }
+
+};
+
+// --------------------------------------------------------------------------------
+
 #include "subcmd.h"
 
 subcmd motif_cmap[] = {
-  { "hello03", motif_hello,  },
-  { "motif", motif_parts,  },
-  { "edit02", motif_edit,  },
+  { "motif-parts", motif_app01, },
+  { "motif-editor", motif_app01,  },
   { "mrm", motif_mrmtest,  },
+  { "motif", motif_app01,  },
   { 0 },
 };
 
