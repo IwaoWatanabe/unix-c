@@ -86,6 +86,7 @@ LIBUC_OBJS += mysql-driver.o mysql-tool.o
 LIBUC_OBJS += xt-proc.o
 LIBUC_OBJS += awt-util.o SmeCascade.o
 LIBUC_OBJS += index.o
+LIBUC_OBJS += userinfo.o
 
 APP04_OBJS += xwin.o 
 APP04_OBJS += awt.o

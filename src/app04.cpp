@@ -184,6 +184,9 @@ int main(int argc, char **argv) {
   extern subcmd mysql_cmap[];
   subcmd_add(mysql_cmap);
 
+  extern subcmd user_cmap[];
+  subcmd_add(user_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }
