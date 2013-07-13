@@ -100,6 +100,7 @@ namespace uc {
       fprintf(stderr,"INFO: logger %s output %ld bytes.\n", 
 	      error_logfile_name, counter);
 
+    counter = 0;
     free((void *)error_logfile_name);
     error_logfile_name = 0;
   }
