@@ -87,6 +87,7 @@ LIBUC_OBJS += xt-proc.o
 LIBUC_OBJS += awt-util.o SmeCascade.o
 LIBUC_OBJS += index.o
 LIBUC_OBJS += userinfo.o
+LIBUC_OBJS += keytool.o
 
 APP04_OBJS += xwin.o 
 APP04_OBJS += awt.o

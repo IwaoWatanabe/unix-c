@@ -187,6 +187,9 @@ int main(int argc, char **argv) {
   extern subcmd user_cmap[];
   subcmd_add(user_cmap);
 
+  extern subcmd key_cmap[];
+  subcmd_add(key_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }
