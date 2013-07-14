@@ -105,20 +105,36 @@ namespace {
   }
 
   /// Xm文字列のテーブルに変換
-  static XmStringTable asXmStringTable(vector<string> &entries) {
+  static XmStringTable as_XmStringTable(vector<string> &entries) {
     size_t n = entries.size();
-    XmString *tbl = (XmString *)XtMalloc (n * sizeof (XmString));
+    XmString *tbl = (XmString *)XtMalloc ((1+n) * sizeof (XmString)), *tt = tbl;
     for (size_t i = 0; i < n; i++)
-      tbl[i] = XmStringCreateLocalized((char *)entries[i].c_str());
+      *tt++ = XmStringCreateLocalized((char *)entries[i].c_str());
+    *tt = 0;
     return tbl;
   }
 
   /// Xm文字列のテーブルを開放
-  static void freeXmStringTable(XmStringTable tbl, size_t n) {
+  static void free_XmStringTable(XmStringTable tbl, size_t n) {
     XmString *str = tbl;
     for (size_t i = 0; i < n; i++)
       XmStringFree(str[n]);
     XtFree ((char *)tbl); 
+  }
+
+  /// Xm文字列のテーブルに変換
+  XmStringTable as_XmStringTable(char **item, size_t n) {
+    XmString *tbl = (XmString *)XtMalloc ((1+n) * sizeof (XmString)), *tt = tbl;
+    for (size_t i = 0; i < n; i++)
+      *tt++  = XmStringCreateLocalized(item[i]);
+    *tt = 0;
+    return tbl;
+  }
+
+  static int store(const char * const *items, vector<string> &vec) {
+    vec.clear();
+    while (*items) { vec.push_back(*items++); }
+    return vec.size();
   }
 
   /// フォルダ一覧を表示するリスト
@@ -145,7 +161,7 @@ namespace {
 				   XmNsubMenuId, create_pulldown_menu("dir", bar, dir_items),
 				   NULL);
 
-    XmStringTable tbl = asXmStringTable(entries);
+    XmStringTable tbl = as_XmStringTable(entries);
 
     Widget list = XmCreateScrolledList( main, "file-list", 0, 0);
     XtVaSetValues(main, XmNworkWindow, XtParent(list), NULL);
@@ -312,7 +328,7 @@ namespace {
 
     XtManageChild(list);
 
-    //freeXmStringTable(tbl, n_entries);
+    //free_XmStringTable(tbl, n_entries);
     XtFree((char *)tbl);
     /*
      * アイテムを開放するとSEGVになる
@@ -329,11 +345,42 @@ namespace {
     XtRealizeWidget(top);
   }
 
+  /// コマンドを操作するインタフェース
+  struct Command_Info {
+    virtual ~Command_Info() { }
+    // 選択項目を返却する
+    virtual int get_command_entries(vector<string> &items) = 0;
+    // コマンドプロンプトを返却する
+    virtual string get_command_prompt() { return "Command"; }
+    // コマンドが選択、確定されたタイミングで呼び出される
+    virtual bool command_notify(wchar_t *wcs, XmCommandCallbackStruct *cbs) = 0;
+  };
+
+  /// セレクション・ダイアログを操作するインタフェース
+  struct Selection_Info {
+    virtual ~Selection_Info() { }
+    // 選択項目を返却する
+    virtual int get_selection_entries(vector<string> &items) = 0;
+    // セレクションのプロンプトを返却する
+    virtual string get_selection_prompt() { return "Selection"; }
+    // 選択項目のラベルを返却する
+    virtual string get_selection_label() = 0;
+    // セレクションが選択、確定されたタイミングで呼び出される
+    virtual bool selection_notify(wchar_t *wcs, XmSelectionBoxCallbackStruct *cbs) = 0;
+  };
+
   /// Motif の各種部品の振る舞いを確認する
-  class Parts_Frame : public Frame {
+  class Parts_Frame : public Frame, public Selection_Info, public Command_Info {
     Widget info, warn, err;
     Widget prompt, command, selection;
     Widget tree;
+
+    int get_command_entries(vector<string> &items);
+    bool command_notify(wchar_t *wcs, XmCommandCallbackStruct *cbs);
+
+    string get_selection_label() { "Months"; }
+    int get_selection_entries(vector<string> &items);
+    bool selection_notify(wchar_t *wcs, XmSelectionBoxCallbackStruct *cbs);
 
     static void info_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
     static void warn_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data);
@@ -346,6 +393,10 @@ namespace {
     static void create_tree_test(Widget shell);
 
   public:
+    Parts_Frame()
+      : info(0), warn(0), err(0),
+	prompt(0), command(0), selection(0), tree(0) { }
+
     Widget create_contents(Widget shell);
   };
 
@@ -521,19 +572,46 @@ namespace {
      */
   }
 
-  /// Xm文字列のテーブルに変換
-  XmStringTable asXmStringTable(char **item, size_t n) {
-    XmString *tbl = (XmString *)XtMalloc (n * sizeof (XmString));
-    for (size_t i = 0; i < n; i++)
-      tbl[i] = XmStringCreateLocalized(item[i]);
-    return tbl;
-  }
-
   /// コマンドの入力通知
   static void command_entered_cb(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " command callback." << endl;
+    Command_Info *cmd = (Command_Info *)client_data;
     XmCommandCallbackStruct *cbs = (XmCommandCallbackStruct *)call_data;
+    /// ワイドキャラクタで取り出す
+    wchar_t *wcs = (wchar_t *)XmStringUnparse(cbs->value, NULL, XmWIDECHAR_TEXT, XmWIDECHAR_TEXT, NULL, 0, XmOUTPUT_ALL);
+    bool res = cmd->command_notify(wcs, cbs);
+    XtFree((char *)wcs);
+    if (res) XtUnmanageChild(widget);
+  }
 
+  /// コマンド・ダイアログの作成
+  static Widget create_command_dialog(Widget shell, char *name, Command_Info *cmd) {
+
+    string tt = cmd->get_command_prompt();
+    XmString prompt = XmStringCreateLocalized((char *)tt.c_str());
+
+    vector<string> items;
+    int cnt = cmd->get_command_entries(items);
+    XmStringTable tbl = as_XmStringTable(items);
+    Widget dialog = XmCreateCommandDialog(shell,name,0,0);
+    XtVaSetValues(dialog,
+		  XmNhistoryItems, tbl,
+		  XmNhistoryItemCount, cnt,
+		  XmNpromptString, prompt,
+		  NULL);
+    XmStringFree(prompt);
+    XtAddCallback(dialog, XmNcommandEnteredCallback, command_entered_cb, cmd);
+    XtAddCallback(dialog, XmNcommandChangedCallback, command_entered_cb, cmd);
+    return dialog;
+  }
+
+  int Parts_Frame::get_command_entries(vector<string> &items) {
+    static char *days[] = {
+      "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 0};
+    return store(days, items);
+  }
+
+  bool Parts_Frame::command_notify(wchar_t *wcs, XmCommandCallbackStruct *cbs) {
     switch (cbs->reason) {
     case XmCR_COMMAND_ENTERED:
       break;
@@ -541,11 +619,9 @@ namespace {
       cerr << "TRACE: CHANGED" << endl;
     }
 
-    wchar_t *wcs = (wchar_t *)XmStringUnparse(cbs->value, NULL, XmWIDECHAR_TEXT, XmWIDECHAR_TEXT, NULL, 0, XmOUTPUT_ALL);
-    /// ワイドキャラクタで取り出す
     wcerr << "INFO: " << wcs << "(wcs)" << endl;
     fprintf(stderr, "INFO: %ls(wcs fprintf)\n", wcs);
-    XtFree((char *)wcs);
+    return cbs->reason == XmCR_COMMAND_ENTERED;
   }
 
   /// コマンド・ダイアログ表示機能の選択
@@ -555,24 +631,7 @@ namespace {
 
     if (!app->command) {
       Widget shell = find_shell(widget, 0);
-      Widget cmd = XmCreateCommandDialog(shell,"command-dialog",0,0);
-
-      static char *days[] = {
-	"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-
-      XmStringTable tbl = asXmStringTable(days, XtNumber(days));
-
-      XmString prompt = XmStringCreateLocalized("Command");
-
-      XtVaSetValues(cmd, 
-		    XmNhistoryItems, tbl, 
-		    XmNhistoryItemCount, XtNumber(days), 
-		    XmNpromptString, prompt,
-		    NULL);
-      XmStringFree(prompt);
-      XtAddCallback(cmd, XmNcommandEnteredCallback , command_entered_cb, 0);
-      XtAddCallback(cmd, XmNcommandChangedCallback , command_entered_cb, 0);
-      app->command = cmd;
+      app->command = create_command_dialog(shell,"command-dialog", app);
     }
 
     XtManageChild(app->command);
@@ -580,8 +639,51 @@ namespace {
 
   static void selection_cb(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    XmSelectionBoxCallbackStruct *cbs =
-      (XmSelectionBoxCallbackStruct *)call_data;
+    XmSelectionBoxCallbackStruct *cbs = (XmSelectionBoxCallbackStruct *)call_data;
+    Selection_Info *sel = (Selection_Info *)client_data;
+
+    /// ワイドキャラクタで取り出す
+    wchar_t *wcs = (wchar_t *)XmStringUnparse(cbs->value, NULL, XmWIDECHAR_TEXT, XmWIDECHAR_TEXT, NULL, 0, XmOUTPUT_ALL);
+    bool res = sel->selection_notify(wcs, cbs);
+    XtFree((char *)wcs);
+    if (res) XtUnmanageChild(widget);
+  }
+
+  static Widget create_selection_dialog(Widget shell, char *name, Selection_Info *sel) {
+    Widget selection = XmCreateSelectionDialog(shell, name, NULL, 0);
+
+    string tt = sel->get_selection_prompt();
+    XmString label = XmStringCreateLocalized((char *)tt.c_str());
+
+    vector<string> items;
+    int cnt = sel->get_selection_entries(items);
+    XmStringTable tbl = as_XmStringTable(items);
+
+    XtVaSetValues(selection,
+		   XmNlistLabelString, label,
+		   XmNlistItems, tbl,
+		   XmNlistItemCount, cnt,
+		   XmNmustMatch, True,
+		   NULL);
+    XtAddCallback(selection, XmNokCallback, selection_cb, sel);
+    XtAddCallback(selection, XmNnoMatchCallback, selection_cb, sel);
+    XmStringFree(label);
+    free_XmStringTable(tbl, cnt);
+    /*
+      selection の場合は、開放しないとリークする
+     */
+
+    return selection;
+  }
+
+  int Parts_Frame::get_selection_entries(vector<string> &items) {
+    static char *months[] = {
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December", 0, };
+    return store(months, items);
+  }
+
+  bool Parts_Frame::selection_notify(wchar_t *wcs, XmSelectionBoxCallbackStruct *cbs) {
     switch (cbs->reason) {
     case XmCR_OK:
       break;
@@ -589,45 +691,20 @@ namespace {
       break;
     }
 
-    wchar_t *wcs = (wchar_t *)XmStringUnparse(cbs->value, NULL, XmWIDECHAR_TEXT, XmWIDECHAR_TEXT, NULL, 0, XmOUTPUT_ALL);
     wcerr << "INFO: " << wcs << "(wcs)" << endl;
     fprintf(stderr, "INFO: %ls(wcs fprintf)\n", wcs);
 
-    XtFree((char *)wcs);
-    /// ワイドキャラクタで取り出す
+    //return cbs->reason == XmCR_OK;
+    return false;
   }
 
   void Parts_Frame::selection_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
     Parts_Frame *app = (Parts_Frame *)client_data;
 
-    static char *months[] = {
-      "January", "February", "March", "April", "May", "June", 
-      "July", "August", "September", "October", "November", "December"};
-
-    struct ListItem {
-      char *label, **strings;
-      size_t size;
-    };
-
-    ListItem month_items = {"Months", months, XtNumber(months), }, *items = &month_items;
-
     if (!app->selection) {
       Widget shell = find_shell(widget, 0);
-      Widget selection = XmCreateSelectionDialog(shell, "selection", NULL, 0);
-      XmString label = XmStringCreateLocalized(items->label);
-      XmStringTable tbl = asXmStringTable(items->strings, items->size);
-
-      XtVaSetValues (selection, 
-		     XmNlistLabelString, label, 
-		     XmNlistItems, tbl,
-		     XmNlistItemCount, items->size,
-		     XmNmustMatch, True,
-		     NULL);
-      XtAddCallback (selection, XmNokCallback, selection_cb, NULL);
-      XtAddCallback (selection, XmNnoMatchCallback, selection_cb, NULL);
-      XmStringFree(label);
-      freeXmStringTable(tbl, items->size);
+      Widget selection = create_selection_dialog(shell, "selection", app);
       app->selection = selection;
     }
 
@@ -754,7 +831,6 @@ namespace {
   /// 素朴なテキストエディタ(Motif版)
   class Editor_Frame : public Frame {
     Widget buf, dialog;
-
     static void copy_selected(Widget widget, XtPointer client_data, XtPointer call_data);
     static void cut_selected(Widget widget, XtPointer client_data, XtPointer call_data);
     static void paste_selected(Widget widget, XtPointer client_data, XtPointer call_data);
@@ -765,6 +841,8 @@ namespace {
     static void open_file_dialog(Widget widget, XtPointer client_data, XtPointer call_data);
 
   public:
+    Editor_Frame() : buf(0), dialog(0) { }
+
     Widget create_contents(Widget shell);
   };
 
@@ -776,7 +854,6 @@ namespace {
   void Editor_Frame::copy_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     XmPushButtonCallbackStruct *cs = (XmPushButtonCallbackStruct *)call_data;
     Editor_Frame *app = (Editor_Frame *)client_data;
-
     XmTextCopy(app->buf, cs->event->xbutton.time);
     cerr << "TRACE: " << XtName(widget) << " copy selected." << endl;
   }
@@ -983,10 +1060,23 @@ namespace {
 namespace {
 
   /// MRM;Motif Resource Managerを利用するサンプル・コード
-  struct mrm_app {
+  class MRM_Frame : public Frame {
     MrmHierarchy hierarchy_id;
     Widget container;
     MrmType mrm_class;
+
+    Widget create_message_button(const char *msg, Widget parent, char *name = "msg");
+    static void app_report_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void param_report_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+    static void close_proc(Widget widget, XtPointer client_data, XtPointer call_data);
+  public:
+    MRM_Frame() : hierarchy_id(0), container(0), mrm_class(0) { }
+    ~MRM_Frame();
+    Widget create_contents(Widget shell);
+  };
+
+  class MRM_Frame_Factory : public Frame_Factory {
+    Frame *get_instance() { return new MRM_Frame(); }
   };
 
   static const char *get_mrm_reason(Cardinal rc) {
@@ -999,39 +1089,54 @@ namespace {
     return "UNKOWN";
   }
 
-  static void mrm_report_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void MRM_Frame::app_report_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
     Widget dialog = (Widget)client_data;
-#if 1
-    mrm_app *app = (mrm_app *)client_data;
-    cerr << "container:" << XtName(app->container) << endl;
-#else
+    MRM_Frame *app = (MRM_Frame *)client_data;
+    cerr << "app: " << app << endl;
+    cerr << "container: " << XtName(app->container) << endl;
+    cerr << "widget: " << XtName(widget) << endl;
+  }
+
+  void MRM_Frame::param_report_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
+    Widget dialog = (Widget)client_data;
     int *app = (int *)client_data;
-    cerr << "int:" << *app << endl;
-#endif
+    cerr << "int: " << *app << endl;
   }
 
-  static void mrm_destroy_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
-    mrm_app *app = (mrm_app *)client_data;
-    if (app->hierarchy_id) {
-      Cardinal rc = MrmCloseHierarchy(app->hierarchy_id);
-      cerr << "TRACE: MrmCloseHierarchy:" << get_mrm_reason(rc) << endl;
+  void MRM_Frame::close_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
+    MRM_Frame *app = (MRM_Frame *)client_data;
+    cerr << "close: " << XtName(app->container) << endl;
+    cerr << "widget: " << XtName(widget) << endl;
+  }
+
+  MRM_Frame::~MRM_Frame() {
+    if (hierarchy_id) {
+      Cardinal rc = MrmCloseHierarchy(hierarchy_id);
+      cerr << "TRACE: MrmCloseHierarchy: " << get_mrm_reason(rc) << endl;
     }
-    delete app;
-    cerr << "TRACE: app released." << endl;
   }
 
-  static int create_mrm_app(char *app_name, Widget top) {
+  /// ボタンを作成する
+  Widget MRM_Frame::create_message_button(const char *msg, Widget parent, char *name) {
+    Widget pb = XmVaCreateManagedPushButton(parent, name, NULL);
+    XtVaSetValues(pb, XmNlabelString, XmStringCreateLocalized((char *)msg), NULL);
+    XtAddCallback(pb, XmNactivateCallback, quit_application, NULL);
+    return pb;
+  }
+
+  Widget MRM_Frame::create_contents(Widget top) {
+
     static char *uid_files[] = { "mrmtest.uid", };
     /*
-     * 「UIL File Format」をキーに検索するとUILファイルの書式が見つかる
+     * 「UIL File Format」をキーにGoogleで検索するとUILファイルの書式が見つかる
      */
-    mrm_app *app = new mrm_app();
 
     MrmRegisterArg reg_list[] = {
       { "quit_application", (XtPointer)quit_application, },
-      { "app_close", (XtPointer)mrm_destroy_proc, },
-      { "app_report", (XtPointer)mrm_report_proc, },
-      { "app", (XtPointer)app, }, // UIL のidentifierで定義している
+      { "app_report", (XtPointer)app_report_proc, },
+      { "app_param_report", (XtPointer)param_report_proc, },
+      { "app_close", (XtPointer)close_proc, },
+      { "app", (XtPointer)this, }, // UIL のidentifierで定義している
     };
 
     MrmInitialize();
@@ -1042,60 +1147,50 @@ namespace {
     MrmOsOpenParamPtr *ancillary_structures_list = 0;
     Cardinal rc = 
       MrmOpenHierarchyPerDisplay(XtDisplay(top), 
-				 XtNumber(uid_files),uid_files, 
-				 ancillary_structures_list, &app->hierarchy_id);
+				 XtNumber(uid_files), uid_files, 
+				 ancillary_structures_list, &hierarchy_id);
     /*
       UILファイルの読み取り
      */
     if (rc != MrmSUCCESS) {
-      cerr << "ERROR: MrmOpenHierarchyPerDisplay:" << get_mrm_reason(rc) << endl;
-      return 1;
+      string ebuf("ERROR: MrmOpenHierarchyPerDisplay: ");
+      ebuf.append(get_mrm_reason(rc));
+
+      const char *sep = "\n";
+      for (int i = 0, n = XtNumber(uid_files); i < n; i++) {
+	ebuf.append(sep).append(uid_files[i]);
+      }
+
+      cerr << ebuf << endl;
+      create_message_button(ebuf.c_str(), top);
+      return 0;
     }
 
-    rc = MrmRegisterNamesInHierarchy(app->hierarchy_id, reg_list, XtNumber(reg_list));
+    rc = MrmRegisterNamesInHierarchy(hierarchy_id, reg_list, XtNumber(reg_list));
     /*
       UILの定義文字列とC関数の対応付け
      */
     if (rc != MrmSUCCESS) {
-      cerr << "ERROR: MrmRegisterNamesInHierarchy:" << get_mrm_reason(rc) << endl;
-      return 1;
+      string ebuf("ERROR: MrmRegisterNamesInHierarchy: ");
+      cerr << ebuf.append(get_mrm_reason(rc)) << endl;
+      create_message_button(ebuf.c_str(), top);
+      return 0;
     }
 
-    rc = MrmFetchWidget(app->hierarchy_id, app_name, top, &app->container, &app->mrm_class);
+    char *app_name = "mrmtest";
+    rc = MrmFetchWidget(hierarchy_id, app_name, top, &container, &mrm_class);
     /*
       Widgetの生成
      */
     if (rc != MrmSUCCESS) {
-      cerr << "ERROR: MrmFetchWidget:" << app_name << ":" << get_mrm_reason(rc) << endl;
-      return 1;
+      string ebuf("ERROR: MrmFetchWidget: ");
+      cerr << ebuf.append(app_name).append(": ").append(get_mrm_reason(rc)) << endl;
+      create_message_button(ebuf.c_str(), top);
+      return 0;
     }
-    XtManageChild(app->container);
-    XtRealizeWidget(top);
-    return 0;
-  }
 
-  static int motif_mrmtest(int argc, char **argv) {
-    static String app_class = "MRMtest", app_name = "mrmtest",
-      fallback_resouces[] = { 
-      "*fontList: -*-*-*-*-*--16-*:",
-      NULL,
-    };
-    static XrmOptionDescRec options[] = { };
+    XtManageChild(container);
 
-    XtSetLanguageProc(NULL, NULL, NULL);
-
-    XtAppContext context;
-    Widget top = 
-      XtVaOpenApplication(&context, app_class, options, XtNumber(options),
-			  &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
-
-    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
-
-    int rc = create_mrm_app(app_name, top);
-    if (rc == 0) XtAppMainLoop(context);
-
-    XtDestroyApplicationContext(context);
-    cerr << "TRACE: context destroyed." << endl;
     return 0;
   }
 
@@ -1189,6 +1284,7 @@ namespace {
       { "hello", new Hello_Frame_Factory(), },
       { "motif-parts", new Parts_Frame_Factory(), },
       { "motif-editor", new Editor_Frame_Factory(), },
+      { "mrm", new MRM_Frame_Factory(), },
     };
 
     Frame_Factory *ff = 0;
@@ -1290,7 +1386,7 @@ namespace {
 subcmd motif_cmap[] = {
   { "motif-parts", motif_app01, },
   { "motif-editor", motif_app01,  },
-  { "mrm", motif_mrmtest,  },
+  { "mrm", motif_app01,  },
   { "motif", motif_app01,  },
   { 0 },
 };
