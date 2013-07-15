@@ -10,6 +10,37 @@
 namespace uc {
 
   /// 検索条件を格納するDTO
+  /**
+
+例えば、文書Xに対して、
+\verbatim
+search_word：A B
+and_key：C D
+or_key：E F
+not_key：G H
+or_key2：I J
+include：A1=V1|V2&A2=V3|V4
+exclude：A3=V5|V6&A4=V7|V8
+\endverbatim
+
+という条件が与えられた場合の論理式は、
+
+\verbatim
+(X.contains(A) || X.contains(B) )
+&& (X.contains(C) && X.contains(D) )
+&& (X.contains(E) || X.contains(F) )
+&& !(X.contains(G) || X.contains(H) )
+&& (X.contains(I) || X.contains(J) )
+&& ( (X.attributeA1==V1 || X.attributeA2 == V2 ) && ( X.attributeA2==V3 || X.attirbuteA2==V4 ) )
+&& !( (X.attributeA3==V5 || X.attributeA3 == V6 ) || ( X.attributeA4==V7 || X.attirbuteA4==V8 ) )
+\endverbatim
+
+となる。
+
+search_word, and_key, or_key, not_keyに関しては、自動的に部分一致として扱われるが、
+include, excludeで指定した属性は、指定された属性名により、部分一致となるか完全一致となるか挙動が決まる。
+  */
+
   struct Index_Condition {
     std::vector<std::string> target, search_word, and_key, not_key, or_key, or_key2, or_key3;
     std::map<std::string,std::string> includes, excludes;
@@ -176,6 +207,12 @@ namespace idx {
   */
 
   class Senna_Index : uc::ELog {
+
+    sen_records *and_records(const vector<string>& words, sen_records *aa = 0,
+			     bool partial = true , bool not_flag = false, int *weight = 0, size_t weight_len = 1);
+    sen_records *or_records(const vector<string>& words, sen_records *aa = 0,
+			    bool partial = true, bool not_flag = false, int *weight = 0, size_t weight_len = 1);
+
   protected:
     sen_index *index;
     string index_path;
@@ -264,6 +301,9 @@ namespace idx {
 			      const Value *new_value, const Value *old_value = 0);
     /// テキストをインデックスから検索する
     virtual Result *search(const char *text);
+    /// テキストをインデックスから検索する
+    virtual Result *search(const uc::Index_Condition *cond);
+
     /// 対象ドキュメントが既に格納されているか診断する
     virtual bool contains(const char *doc_key);
     /// ドキュメントが検索に出現しないようにする（内部的には削除フラグが設定される）
@@ -579,6 +619,110 @@ namespace idx {
     return false;
   }
 
+  static int simple_weight[] = { 1, };
+
+  static sen_select_optarg ZERO_OPTARG;
+
+  /**
+   * aa & (words1 & words2 ...) または、aa & !(words1 & words2 ...) を検索する
+   */
+  sen_records *Senna_Index::and_records(const vector<string>& words, sen_records* aa,
+					bool partial, bool not_flag, int *weight, size_t weight_len)
+  {
+    if (words.empty()) return 0;
+    if (!weight) { weight = simple_weight; weight_len = 1; }
+
+    bool first_rec = false;
+    if (!aa) {
+      if (not_flag) return 0;
+      aa = sen_records_open(sen_rec_document, sen_rec_none, 0);
+      if (!aa) return 0;
+      aa->ignore_deleted_records = 1;
+      first_rec = true;
+    }
+
+    sen_select_optarg opts = ZERO_OPTARG;
+    opts.weight_vector = weight;
+    opts.vector_size = weight_len;
+
+    vector<string>::const_iterator it = words.begin();
+
+    for (; it != words.end(); it++) {
+        const char *word = it->c_str();
+        size_t word_len = it->length();
+
+        // " 対策
+        if (word[0] == '"' && word[word_len - 1] == '"') {
+            opts.mode = sen_sel_unsplit;
+            word++;
+            word_len -= 2;
+        }
+	else {
+	  opts.mode = partial ? sen_sel_partial : sen_sel_exact;
+	}
+
+        sen_sel_operator op = it == words.begin() && first_rec ? sen_sel_or :
+	  not_flag ? sen_sel_but : sen_sel_and;
+
+        sen_rc rc = sen_index_select(index, word, word_len, aa, op, &opts);
+        if (rc != sen_success) {
+	  elog("select failed : %d\n", rc, get_error_text(rc));
+	  break;
+	}
+    }
+
+    return aa;
+  }
+
+  /**
+   * aa & (words1 | words2 | words3 ...) の処理を行う。
+   * 式展開は行わず、単純に計算する
+   */
+  sen_records *Senna_Index::or_records(const vector<string>& words, sen_records* aa,
+				       bool partial, bool not_flag, int *weight, size_t weight_len)
+  {
+    if (words.empty()) return 0;
+    if (!weight) { weight = simple_weight; weight_len = 1; }
+
+    sen_records* result = sen_records_open(sen_rec_document, sen_rec_none, 0);
+    if (!result) return 0;
+    result->ignore_deleted_records = 1;
+
+    sen_select_optarg opts = ZERO_OPTARG;
+    opts.weight_vector = weight;
+    opts.vector_size = weight_len;
+
+    vector<string>::const_iterator it = words.begin();
+    for ( ; it != words.end(); it++) {
+        // " 対策
+        const char* word = it->c_str();
+        int word_len = it->length();
+
+        if (word[0] == '"' && word[word_len - 1] == '"') {
+            opts.mode = sen_sel_unsplit;
+            word++;
+            word_len -= 2;
+        }
+	else {
+	  opts.mode = partial ? sen_sel_partial : sen_sel_exact;
+	}
+
+        sen_rc rc = sen_index_select(index, word, word_len, result, sen_sel_or, &opts);
+        if (rc != sen_success) {
+	  elog("select failed : %d\n", rc, get_error_text(rc));
+	  break;
+        }
+    }
+
+    if (aa && sen_records_nhits(aa) > 0) {
+      aa = sen_records_intersect(aa, result);
+    }
+    else if (!aa)
+      aa = result;
+
+    return aa;
+  }
+
   /// 単純検索
   Senna_Index::Result *Senna_Index::search(const char *text) {
     if (!index) {
@@ -596,6 +740,88 @@ namespace idx {
     Result *res0 = new Result(res,this);
     return res0;
   }
+
+  /// 検索
+  Senna_Index::Result *Senna_Index::search(const uc::Index_Condition *cond) {
+    if (!index) {
+      elog(W, "search called but, index not opend.\n");
+      return 0;
+    }
+    string tbuf;
+    rec.time_load();
+
+    // 1. まず、andKeyを処理する
+    sen_records *and_res = 0;
+
+    if (!cond->and_key.empty()) {
+      and_res = and_records(cond->and_key, 0);
+      if (sen_records_nhits(and_res) == 0) { return 0; }
+    }
+
+    // 2. 次にnotKeyを処理する
+    sen_records *not_res = 0;
+
+    if (!cond->not_key.empty()) {
+      not_res = or_records(cond->not_key, 0);
+    }
+
+    // (a & b & c...) & !(x or y or z) を実行する
+    sen_records *res = 0;
+    if (and_res && not_res) {
+      res = sen_records_subtract(and_res, not_res);
+      if (sen_records_nhits(res) == 0) { return 0; }
+      not_res = 0;
+    }
+    else
+      res = and_res;
+
+    // searchWordを処理する(orKeyと同じ処理をしている)
+
+    if (!cond->search_word.empty()) {
+      res = or_records(cond->search_word, res);
+
+      if (res && not_res) {
+	res = sen_records_subtract(res, not_res);
+	not_res = NULL;
+      }
+      if (sen_records_nhits(res) == 0) { return 0; }
+    }
+
+    // orKeyを処理する
+    if (!cond->or_key.empty()) {
+      res = or_records(cond->or_key, res);
+      if (res && not_res) {
+	res = sen_records_subtract(res, not_res);
+	not_res = NULL;
+      }
+      if (sen_records_nhits(res) == 0) return 0;
+    }
+
+    if (!cond->or_key2.empty()) {
+      res = or_records(cond->or_key2, res);
+      if (res && not_res) {
+	res = sen_records_subtract(res, not_res);
+	not_res = NULL;
+      }
+      if (sen_records_nhits(res) == 0) return 0;
+    }
+
+    if (!cond->or_key3.empty()) {
+      res = or_records(cond->or_key3, res);
+      if (res && not_res) {
+	res = sen_records_subtract(res, not_res);
+	not_res = NULL;
+      }
+      if (sen_records_nhits(res) == 0) return 0;
+    }
+
+    rec.time_report("search (with-condition) ", tbuf);
+    elog(T, "%s", tbuf.c_str());
+
+    Result *res0 = new Result(res, this);
+    return res0;
+  }
+
 
   bool Senna_Index::contains(const char *doc_key) {
     if (!index) return false;
