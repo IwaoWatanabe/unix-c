@@ -26,6 +26,8 @@ namespace uc {
     virtual void end_scan_dir() = 0;
     /// ディレクトリであるか診断する
     virtual bool isdir(const char *dirpath) = 0;
+    /// 一般ファイルが存在するか診断する
+    virtual bool isfile(const char *filepath) = 0;
     /// 作業ディレクトリ名を入手する
     virtual std::string getcwd() = 0;
     /// 作業ディレクトリ名を変更する

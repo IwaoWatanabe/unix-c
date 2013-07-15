@@ -62,6 +62,7 @@ namespace {
     char *next_entry(struct stat *sbuf = 0, bool follow_link = false);
     void end_scan_dir();
     bool isdir(const char *dirpath);
+    bool isfile(const char *filepath);
     std::string getcwd();
     bool chdir(const char *dirpath);
     bool mkdirs(const char *dirpath);
@@ -344,6 +345,14 @@ namespace {
     return false; 
   }
 
+  bool Local_File_Impl::isfile(const char *filepath) {
+    struct stat sbuf;
+    if (stat(filepath, &sbuf) == 0) {
+      // アクセスできるエントリが存在する
+      if (S_ISREG(sbuf.st_mode)) return true;
+    }
+    return false;
+  }
 
   /// ディレクトリがなければ作成する
   /**
