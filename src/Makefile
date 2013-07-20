@@ -32,6 +32,7 @@ LDFLAGS += -ldb
 LDFLAGS += -lgdbm
 LDFLAGS += -lqdbm
 LDFLAGS += -lmecab -lsenna
+LDFLAGS += -lfcgi
 
 ifdef USE_DB_DBM
 CXXFLAGS += -DDB_DBM_HSEARCH=1
@@ -88,6 +89,7 @@ LIBUC_OBJS += awt-util.o SmeCascade.o
 LIBUC_OBJS += index.o
 LIBUC_OBJS += userinfo.o
 LIBUC_OBJS += keytool.o
+LIBUC_OBJS += fcgi-service.o
 
 APP04_OBJS += xwin.o 
 APP04_OBJS += awt.o
