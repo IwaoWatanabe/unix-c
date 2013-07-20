@@ -58,16 +58,17 @@ namespace {
 
   class My_Cursor_Impl : public mysqlpp::Cursor, uc::ELog {
   protected:
-    mysqlpp::Connection *ref;
-    string cname;
-    bool truncated, verbose;
-
+    string cname, query_text;
+    int exec_count, fetch_count;
   public:
     My_Cursor_Impl(MYSQL_STMT *stmt, mysqlpp::Connection *conn, const char *name) 
-      : mysqlpp::Cursor(stmt, conn), cname(name)
+      : mysqlpp::Cursor(stmt, conn), cname(name), exec_count(0), fetch_count(0)
     {
       init_elog("My_Cursor_Impl");
     }
+
+    void set_verbose(bool tt) { verbose = tt; }
+    void set_query_text(const std::string &query_text);
 
     virtual ~My_Cursor_Impl() { free(); }
     virtual void free();
@@ -92,12 +93,14 @@ namespace {
     if (st) {
       int rc = mysql_stmt_close(st);
       if (rc) elog(W, "while statemet closing:(%u)\n", rc);
+
+      elog(T, "cursor %s closed. %d execute, %d fetches\n", cname.c_str(), 
+	   exec_count, fetch_count);
     }
     st = 0;
   }
 
   void My_Cursor_Impl::release() {
-    elog(T, "release notify: %p", this);
     free();
   }
 
@@ -112,6 +115,13 @@ namespace {
     if (st) return (unsigned long)mysql_stmt_insert_id(st);
     return 0lu;
   }
+
+  void My_Cursor_Impl::set_query_text(const std::string &query_text) {
+    this->query_text = query_text;
+    size_t len = query_text.size();
+    if (query_text.at(len - 1) != '\n')
+      this->query_text.append("\n");
+  }
   
   /// SQLテキストを設定する
   bool My_Cursor_Impl::prepare(const std::string &query_text) {
@@ -120,18 +130,25 @@ namespace {
     int rc = mysql_stmt_prepare(st, query_text.c_str(), query_text.size());
     if (rc != 0) {
       elog("prepare failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
+      return false;
     }
 
-    elog(T, "prepared: %s\n %s\n", cname.c_str(), query_text.c_str());
-    return rc == 0;
+    if (verbose) set_query_text(query_text);
+
+    /*
+      ライブラリ側でも保持するようにする。
+    */
+
+    elog(T, "prepare: %s\n %s\n", cname.c_str(), query_text.c_str());
+    return true;
   }
 
   /// 結果セットのリソースを解放する
   void My_Cursor_Impl::free_result() {
     if (!st) return;
     my_bool rc = mysql_stmt_free_result(st);
-    if (rc == 0) return;
-    elog(W,"free result failure:(%u)\n", rc);
+    if (rc != 0)
+      elog(W,"free result failure %s:(%u)\n", cname.c_str(), rc);
   }
 
   /// 必要とするパラメータ数
@@ -146,7 +163,8 @@ namespace {
 
     my_bool rc = mysql_stmt_bind_param(st, bind);
     if (rc == 0) return true;
-    elog("bind failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
+    elog("bind failure %s:(%u):%s\n%s", cname.c_str(), 
+	 mysql_stmt_errno(st), mysql_stmt_error(st), query_text.c_str());
     return false;
   }
 
@@ -162,18 +180,20 @@ namespace {
     my_bool rc = mysql_stmt_bind_result(st, bind);
     if (rc == 0) return true;
 
-    elog("bind result failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
+    elog("bind result failure %s:(%u):%s\n%s", cname.c_str(),
+	 mysql_stmt_errno(st), mysql_stmt_error(st), query_text.c_str());
     return false;
   }
   
   /// クエリを実行する 
   bool My_Cursor_Impl::execute(bool populate) {
     if (!st) return false;
-
+    exec_count++;
     int rc = mysql_stmt_execute(st);
     if (rc != 0) {
       // 成功した場合ゼロ。エラーが起こった場合、ゼロ以外。
-      elog("execute failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
+      elog("execute failure %s:(%u):%s\n", cname.c_str(),
+	   mysql_stmt_errno(st), mysql_stmt_error(st), query_text.c_str());
       return false;
     }
     if (!populate) return true;
@@ -182,30 +202,33 @@ namespace {
     // 成功した場合ゼロ。エラーが起こった場合、ゼロ以外。
     if (rc == 0) return true;
 
-    elog("store result failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
+    elog("store result failure %s:(%u):%s\n", cname.c_str(),
+	 mysql_stmt_errno(st), mysql_stmt_error(st), query_text.c_str());
     return false;
   }
 
   /// 行データを取り寄せる
   bool My_Cursor_Impl::fetch() {
     if (!st) return false;
+    fetch_count++;
 
     int rc = mysql_stmt_fetch(st);
     switch(rc) {
     case MYSQL_DATA_TRUNCATED:
       if (!truncated) {
-	elog(W, "fetch: data truncated.\n");
+	elog(W, "fetch: %s data truncated.\n", cname.c_str());
 	truncated = true;
       }
     case 0:
       return true;
     case 1:
-      elog("fetch failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
+      elog("fetch failure %s:(%u):%s\n%s", cname.c_str(),
+	   mysql_stmt_errno(st), mysql_stmt_error(st), query_text.c_str());
     case MYSQL_NO_DATA:
       return false;
     }
 
-    elog("unkown fetch code:(%d)\n", rc);
+    elog("unkown fetch code %s:(%d)\n", cname.c_str(), rc);
     return false;
   }
 
@@ -299,7 +322,7 @@ namespace {
       mysql_real_connect(conn, host, user, pass, name, port, socket, client_flag);
 
     if (!res) {
-      elog(E, "mysql:%s@%s:%d/%s;socket=%s;flag=%#x (%u):%s", 
+      elog(E, "mysql:%s@%s:%d/%s;socket=%s;flag=%#x (%u):%s\n", 
 	   user, host, port, name, socket, client_flag,
 	   mysql_errno(conn), mysql_error(conn) );
       return false;
@@ -504,7 +527,7 @@ namespace {
     
     if (last_result) mysql_free_result(last_result);
     last_result = 0;
-
+    free_cursor_all();
     const char *host_info = mysql_get_host_info(conn);
     elog(I, "mysql closing: %s\n", host_info);
     mysql_close(conn);
@@ -569,17 +592,19 @@ namespace {
     if (query_text) {
       int rc = mysql_stmt_prepare(st, query_text->c_str(), query_text->size());
       if (rc != 0) {
-	elog("prepare failure:(%u):%s\n", mysql_stmt_errno(st), mysql_stmt_error(st));
-
+	elog("prepare %s failure:(%u):%s\n", name, mysql_stmt_errno(st), mysql_stmt_error(st));
 	rc = mysql_stmt_close(st);
 	if (rc) elog(W, "while statemet closing:(%u)\n", rc);
 	return 0;
       }
-      elog(T, "prepared: %s:%d\n %s\n", name, mysql_stmt_param_count(st), query_text->c_str());
+      elog(T, "prepare %s:%d\n %s\n", name, mysql_stmt_param_count(st), query_text->c_str());
     }
 
     // 登録する
     My_Cursor_Impl *cur = new My_Cursor_Impl(st, this, name);
+    cur->set_verbose(verbose);
+    if (verbose) cur->set_query_text(*query_text);
+
     stat.insert(map<string, My_Cursor_Impl *>::value_type(name, cur));
 
     return cur;
@@ -599,7 +624,7 @@ namespace {
   void
   My_Connection_Impl::free_cursor_all()
   {
-    elog(T, "free_cursor_all called.");
+    elog(T, "%d cursors closing.\n", (int)stat.size());
 
     // MAPに確保されているステートメントを解放する
     map<string, My_Cursor_Impl *>::iterator it = stat.begin();
