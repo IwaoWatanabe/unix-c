@@ -7,9 +7,10 @@
 
 //#include "uc/fastcgi.hpp"
 
-#include "uc/elog.hpp"
 #include <string>
 #include <vector>
+#include "uc/elog.hpp"
+#include "uc/datetime.hpp"
 
 namespace uc {
 
@@ -46,6 +47,8 @@ namespace uc {
     virtual int write(const char *str, size_t len) = 0;
     /// ブラウザにストリームから読込んだデータを返す（バイナリデータ用）
     virtual int copy_stream(FILE *fin) = 0;
+    /// ブラウザ出力をフラッシュする
+    virtual int flush() = 0;
   };
 
   /// HTTP処理の基本インタフェース
@@ -78,15 +81,29 @@ namespace uc {
 
 };
 
+extern "C" {
+  extern char *trim(char *t);
+  extern char *demangle(const char *demangle);
+};
+
 #include <cstdio>
 #include <cctype>
+#include <csignal>
 #include <fcgiapp.h>
 #include <map>
+#include <sys/stat.h>
+#include <typeinfo>
 
 using namespace std;
+using namespace uc;
 
 /// 一連のファクトリを記録する
-static vector<uc::Http_Servlet_Factory *> servlet_factories;
+static vector<Http_Servlet_Factory *> servlet_factories;
+
+#include <ctime>
+#include <cerrno>
+#include <cstdlib>
+#include <threadpool.hpp>
 
 /// FastCGI を操作する基本APIセット
 namespace fcgi {
@@ -113,6 +130,7 @@ namespace fcgi {
     virtual int puts(const char *str);
     virtual int write(const char *str, size_t len);
     virtual int copy_stream(FILE *fin);
+    virtual int flush();
     virtual const char *get_request_method();
     virtual const char *get_path_info();
     virtual const char *get_header(const char *name);
@@ -168,6 +186,10 @@ namespace fcgi {
       sum += n;
     }
     return sum;
+  }
+
+  int Http_Context_FastCGI_Impl::flush() {
+    return FCGX_FFlush(request.out);
   }
 
   const char *Http_Context_FastCGI_Impl::get_request_method() {
@@ -325,12 +347,37 @@ namespace fcgi {
   }
 
   /// FastCGI サービスの実装
-  class FastCGI_Service_Impl : public uc::Service, uc::ELog {
+  class FastCGI_Service_Impl : public Service, ELog, Property {
     string socket_name, service_name;
     time_t start_time;
     int back_logs;
+    const char *status;
+    volatile bool stop_flag;
 
     virtual void run();
+
+    /// コンテキストと対応する処理
+    map<string, Http_Servlet *> servlet;
+
+    Http_Servlet *find_servlet(const char *context);
+    void store_servlet(const char *context, Http_Servlet *serv);
+    Http_Servlet *remove_servlet(const char *context);
+    void destroy_all_servlet();
+    void load_servlet();
+
+    /// スレッド処理用
+    struct Worker {
+      Http_Context_FastCGI_Impl *con;
+      Http_Servlet *serv;
+      Worker(Http_Context_FastCGI_Impl *_con, Http_Servlet *_serv) : con(_con), serv(_serv) { }
+      Worker(const Worker &wt) : con(wt.con), serv(wt.serv) { }
+      void operator()() {
+	serv->do_request(con);
+	delete con;
+	con = 0;
+      }
+    };
+    boost::threadpool::pool thread_pool;
 
   public:
     FastCGI_Service_Impl();
@@ -340,28 +387,202 @@ namespace fcgi {
     virtual const char *get_service_status();
     virtual const char *get_service_name();
     virtual const char *get_service_version();
+
+    virtual const char * get_property(const char *name, const char *default_value="");
+    virtual long get_property_value(const char *name, long default_value=0);
+    virtual bool get_property_names(std::vector< const char * > &names);
+
+    virtual void set_socket_name(const char *sock) { socket_name = sock; }
   };
 
-  FastCGI_Service_Impl::FastCGI_Service_Impl()
-    : back_logs(50)
-  {
+  static vector<Service *> services;
 
+  static void int_handler(int signum) {
+    vector<Service *>::iterator it = services.begin();
+    while (it != services.end()) { (*it)->stop(); it++; }
+    fputs("interupted!\n",stderr);
+  }
+
+  FastCGI_Service_Impl::FastCGI_Service_Impl()
+    : start_time(0), back_logs(50), status("init"), stop_flag(false), thread_pool(32)
+  {
+    init_elog("FastCGI_Service_Impl");
   }
 
   FastCGI_Service_Impl::~FastCGI_Service_Impl() { }
 
+  Http_Servlet *FastCGI_Service_Impl::find_servlet(const char *context) {
+    map<string, Http_Servlet *>::iterator it = servlet.find(context);
+    if (it == servlet.end()) return 0;
+    return it->second;
+  }
+
+  void FastCGI_Service_Impl::store_servlet(const char *context, Http_Servlet *serv) {
+    servlet.insert(map<string, Http_Servlet *>::value_type(context, serv));
+  }
+
+  Http_Servlet *FastCGI_Service_Impl::remove_servlet(const char *context) {
+    map<string, Http_Servlet *>::iterator it = servlet.find(context);
+    if (it == servlet.end()) return 0;
+
+    Http_Servlet *serv = it->second;
+    servlet.erase(it++);
+    return serv;
+  }
+
+  void FastCGI_Service_Impl::destroy_all_servlet() {
+    map<string, Http_Servlet *>::iterator it = servlet.begin();
+    while (it != servlet.end()) {
+      string context = it->first;
+      Http_Servlet *serv = it->second;
+      servlet.erase(it++);
+      serv->destroy();
+      elog(T, "%s servlet destroyed.\n", context.c_str());
+    }
+  }
+
+  void FastCGI_Service_Impl::load_servlet() {
+    map<string, Http_Servlet_Factory *> servlets;
+
+    vector<Http_Servlet_Factory *>::iterator it = servlet_factories.begin();
+    for (;it != servlet_factories.end(); it++) {
+      Http_Servlet_Factory *sf = *it;
+
+      const char *name = sf->get_class_name();
+      if (!name) {
+	name = demangle(typeid(*sf).name());
+	const char *p;
+	while ((p = strstr(name,"::"))) { name = p + 2; }
+      }
+
+      /// 取りあえずファクトリ名とバージョンを表示してみる
+      printf("factory: %s: %s\n", name, sf->get_version());
+      servlets.insert(map<string, Http_Servlet_Factory *>::value_type(name, sf));
+    }
+
+    struct { char *context, *servlet_name; } url_map[] = {
+      { "hello", "Hello_Servlet_Factory", },
+      { "hello1", "Hello_Servlet_Factory", },
+      { 0, },
+    }, *mp = url_map;
+
+    for (; mp->context; mp++) {
+      Http_Servlet_Factory *sf = servlets[mp->servlet_name];
+      if (!sf) continue;
+      Http_Servlet *serv = sf->create_servlet();
+      elog(T, "/%s: %s servlet initialiing..\n", mp->context, mp->servlet_name );
+      serv->init(this);
+      store_servlet(mp->context, serv);
+    }
+
+  }
+
+  const char * FastCGI_Service_Impl::get_property(const char *name, const char *default_value) {
+    return default_value;
+  }
+
+  long FastCGI_Service_Impl::get_property_value(const char *name, long default_value) {
+    return default_value;
+  }
+
+  bool FastCGI_Service_Impl::get_property_names(std::vector< const char * > &names) {
+    names.clear();
+  }
+
   void FastCGI_Service_Impl::run() {
+
+    status = "INIT";
+
+    if (FCGX_Init()) {
+      elog("FCGX_Init() failed");
+      return;
+    }
+
+    const char *socket_path = socket_name.c_str();
+
+    int fd = FCGX_OpenSocket(socket_path, back_logs);
+    if (fd < 0) {
+      elog("FCGX_OpenSocket(%s) failed : %d", socket_path, fd);
+      return;
+    }
+
+    if (socket_path[0] != ':') {// is unix domain socket
+      struct stat sbuf;
+      if (stat(socket_path, &sbuf) == 0) {
+	sbuf.st_mode |= S_IRWXU|S_IRWXG|S_IRWXO;
+	if (chmod(socket_path, sbuf.st_mode) != 0)
+	  elog(W, "chmod %s failed:(%d):%s\n",socket_path,errno,strerror(errno));
+      }
+    }
+
+    status = "RUNNING";
+
+    elog(I, "service %s started.\n", socket_name.c_str());
+
+    while (!stop_flag) {
+      Http_Context_FastCGI_Impl *req = new Http_Context_FastCGI_Impl(fd, 0);
+      int result = req->accept();
+      if (result != 0) {
+	elog(W, "accept() returns non-zero value(%d)", result);
+	delete req;
+	continue;
+      }
+
+      string context_path;
+      const char* path_info = req->get_path_info();
+      if (path_info) {
+	const char *pi = path_info;
+	if (*pi == '/') pi++;
+	for (; *pi && *pi != '/'; pi++) { context_path += *pi; }
+      }
+
+      Http_Servlet *serv = find_servlet(context_path.c_str());
+      if (serv) {
+#if 1
+	Worker aa(req, serv);
+	thread_pool.schedule(aa);
+#else
+	serv->do_request(req);
+	delete req;
+#endif
+      }
+      else {
+	req->puts("Status: 404 Not Found\n");
+	req->puts("Content-Type: text/html\n\n");
+	req->printf("<html><body><h1>404 not found</h1>"
+		    "The requested resource %s is not found.</body></html>", path_info);
+	delete req;
+      }
+    }
+
+    status = "STOPED";
+
+    destroy_all_servlet();
   }
 
   void FastCGI_Service_Impl::start() {
+    if (time(&start_time) == (time_t)-1)
+      elog(W, "time:(%d):%s\n",errno,strerror(errno));
+
+    services.push_back(this);
+
+    load_servlet();
+    signal(SIGPIPE , SIG_IGN);
+    //signal(SIGINT , int_handler);
+    stop_flag = false;
+
+    run();
+    /*
+      これは仮実装。あとでスレッド化する
+     */
   }
 
   void FastCGI_Service_Impl::stop() {
+    status = "STOPING";
+    stop_flag = true;
   }
 
-  const char *FastCGI_Service_Impl::get_service_status() {
-    return "";
-  }
+  const char *FastCGI_Service_Impl::get_service_status() { return status; }
 
   const char *FastCGI_Service_Impl::get_service_name() {
     return "FastCGI";
@@ -385,11 +606,67 @@ namespace uc {
   Http_Servlet_Factory::~Http_Servlet_Factory() { }
 
   Service::~Service() { }
+
+  Property::~Property() { }
 };
 
-static int cmd_fcgi(int argc, char **argv) {
-  return 0;
-}
+namespace fcgi {
+
+  /// 単純なメッセージを返すだけのサーブレット
+  class Hello_Servlet : public Http_Servlet, ELog {
+    Date dd;
+
+  public:
+    Hello_Servlet() {
+      init_elog("Hello_Servlet");
+    }
+
+    ~Hello_Servlet() {}
+
+    void init(Property *props) {
+      elog(T,"init %p\n",this);
+    }
+
+    void destroy() {
+      elog(T,"destroy %p\n",this);
+    }
+
+    int do_request(Http_Context *req) {
+      elog(T,"req %p\n",this);
+      req->printf("Content-type: %s\n\n", "text/plain");
+      req->printf("Hello .. %s\n", dd.now().get_date_text().c_str());
+
+      const char *asleep = req->query_parameter("asleep");
+      if (asleep) {
+	int tt = atoi(asleep);
+	if (tt) {
+	  req->printf("asleep %d sec..\n",tt);
+	  req->flush();
+	  sleep(tt);
+	}
+      }
+
+      req->printf("done .. %s\n", dd.now().get_date_text().c_str());
+
+      return 0;
+    }
+  };
+
+  /// Hello_Servlet をインスタンス化する
+  class Hello_Servlet_Factory : public Http_Servlet_Factory {
+    Http_Servlet *create_servlet() { return new Hello_Servlet(); }
+  };
+
+  static int cmd_fcgi(int argc, char **argv) {
+    Hello_Servlet_Factory hello;
+    FastCGI_Service_Impl service;
+    service.set_socket_name(":6100");
+    service.start();
+    return 0;
+  }
+
+};
+
 
 // --------------------------------------------------------------------------------
 
@@ -398,7 +675,7 @@ static int cmd_fcgi(int argc, char **argv) {
 #include "subcmd.h"
 
 subcmd fcgi_cmap[] = {
-  { "fcgi", cmd_fcgi, },
+  { "fcgi", fcgi::cmd_fcgi, },
   { 0 },
 };
 
