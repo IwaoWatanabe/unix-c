@@ -109,6 +109,9 @@ CXXFLAGS += -I$(OPENWIN_HOME)/include -DUSE_XVIEW
 APP04_OBJS += olt.o 
 endif
 
+CXXFLAGS += -I$(HOME)/engine
+LDFLAGS += -lboost_thread
+
 libuc.a: $(LIBUC_OBJS)
 	$(AR) r $@ $(LIBUC_OBJS)
 

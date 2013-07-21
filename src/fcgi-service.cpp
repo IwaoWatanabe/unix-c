@@ -12,6 +12,8 @@
 #include "uc/elog.hpp"
 #include "uc/datetime.hpp"
 
+#define THREAD_SUPPORT
+
 namespace uc {
 
   /// HTTPリクエストの基本情報を入手する
@@ -94,6 +96,9 @@ extern "C" {
 #include <sys/stat.h>
 #include <typeinfo>
 
+// see: http://www.fastcgi.com/
+
+
 using namespace std;
 using namespace uc;
 
@@ -102,24 +107,36 @@ static vector<Http_Servlet_Factory *> servlet_factories;
 
 #include <ctime>
 #include <cerrno>
+#include <cstdarg>
 #include <cstdlib>
+#include <fcntl.h>
 #include <threadpool.hpp>
+#include <unistd.h>
+#include <zlib.h>
 
 /// FastCGI を操作する基本APIセット
 namespace fcgi {
 
   /// FastCGIコンテキスト
-  struct Http_Context_FastCGI_Impl : public uc::Http_Context {
+  struct Http_Context_FastCGI_Impl : public Http_Context, ELog {
   protected:
+    /// HTTP処理を仲介するFCGIインスタンス
     FCGX_Request request;
+    /// クエリ・パラメータを保持する
     map<string, vector<string> > *params;
-    map<string, vector<string> > *extract_parameters();
+    /// クエリ・パラメータを抽出する
+    virtual map<string, vector<string> > *extract_parameters();
     string inputEncoding, outputEncoding;
+
+    z_stream strm; bool use_compress;
+    virtual bool init_compress(z_stream &zs);
+    virtual int compress(z_stream &zs, const char*str, int len, bool finish);
 
   public:
     Http_Context_FastCGI_Impl(int fd, int flags);
     ~Http_Context_FastCGI_Impl();
-    int accept();
+    /// FCGIリクエストを待ち受ける
+    virtual int accept();
 
     virtual const char *query_parameter(const char *name);
     virtual std::vector<std::string> *get_query_parameters(const char* name);
@@ -136,12 +153,18 @@ namespace fcgi {
     virtual const char *get_header(const char *name);
     virtual long get_content_length();
     virtual const char *get_query_string();
+
+    virtual void send_unauthorized(const char *realm);
+    virtual void send_forbidden(const char *path_info);
+    virtual void send_not_found(const char *path_info);
+    virtual void send_service_unavailable(const char *path_info);
   };
 
   Http_Context_FastCGI_Impl::Http_Context_FastCGI_Impl(int fd, int flags)
-    : params(0)
+    : params(0), use_compress(false)
   {
     FCGX_InitRequest(&request, fd, flags);
+    init_elog("Http_Context_FastCGI_Impl");
   }
 
   Http_Context_FastCGI_Impl::~Http_Context_FastCGI_Impl() {
@@ -175,6 +198,69 @@ namespace fcgi {
 
   int Http_Context_FastCGI_Impl::write(const char *str, size_t len) {
     return FCGX_PutStr(str, len, request.out);
+  }
+
+  bool Http_Context_FastCGI_Impl::init_compress(z_stream &zs) {
+    puts("Content-encoding: deflate\r\n");
+    zs.zalloc = Z_NULL;
+    zs.zfree = Z_NULL;
+    zs.opaque = Z_NULL;
+    if (deflateInit(&zs, Z_DEFAULT_COMPRESSION) != Z_OK) {
+      elog("deflateInit(zlib) failed: %s\n", zs.msg);
+      return false;
+    }
+    use_compress = true;
+    return true;
+  }
+
+  int Http_Context_FastCGI_Impl::compress(z_stream &zs, const char*str, int len, bool finish) {
+    char outBuf[10240];
+
+    zs.next_out = (Bytef*)outBuf;
+    zs.avail_out = sizeof outBuf;
+    zs.next_in = (Bytef*)str;
+    zs.avail_in = len;
+
+    int flush_flag = finish ? Z_FINISH : Z_NO_FLUSH;
+    for(;;) {
+      if (!finish && zs.avail_in == 0) break;
+
+      int status = deflate(&zs, flush_flag);
+      if (status == Z_STREAM_END) break;
+      if (status != Z_OK) {
+	elog("deflate(zlib) failed: %s\n", zs.msg);
+	return -1;
+      }
+
+      if (zs.avail_out == 0) {
+	int nn = FCGX_PutStr(outBuf, (int)sizeof outBuf, request.out);
+	if (nn != sizeof outBuf) {
+	  elog("FCGX_PutStr failed: %d of %d\n", nn, (int)sizeof outBuf);
+	  return -1;
+	}
+	zs.next_out = (Bytef*)outBuf;
+	zs.avail_out = sizeof outBuf;
+      }
+    }
+
+    if (zs.avail_in > 0) {
+      elog(W, "avail_in exists(zlib). %d\n", zs.avail_in);
+    }
+
+    int count = sizeof outBuf - zs.avail_out;
+    if (count != 0) {
+      int nn = FCGX_PutStr(outBuf, count, request.out);
+      if (nn != count) {
+	elog("FCGX_PutStr failed: %d of %d\n", nn, count);
+	return -1;
+      }
+    }
+
+    zs.next_out = 0;
+    zs.avail_out = 0;
+    zs.next_in = 0;
+    zs.avail_in = 0;
+    return 0;
   }
 
   int Http_Context_FastCGI_Impl::copy_stream(FILE *fin) {
@@ -346,6 +432,32 @@ namespace fcgi {
     return param->begin()->c_str();
   }
 
+  void Http_Context_FastCGI_Impl::send_unauthorized(const char *realm) {
+    puts("Status: 401 Unauthorized\r\n");
+    printf("Authenticate: Basic realm=\"%s\"\r\n", realm);
+  }
+
+  void Http_Context_FastCGI_Impl::send_forbidden(const char *path_info) {
+    puts("Status: 403 Forbidden\r\n");
+    puts("Content-Type: text/html\r\n\r\n");
+    printf("<html><body><h1>404 not found</h1>"
+	   "You don't have permission to access %s on this server.</body></html>", path_info);
+  }
+
+  void Http_Context_FastCGI_Impl::send_not_found(const char *path_info) {
+    puts("Status: 404 Not Found\r\n");
+    puts("Content-Type: text/html\r\n\r\n");
+    printf("<html><body><h1>404 not found</h1>"
+	   "The requested resource %s is not found.</body></html>", path_info);
+  }
+
+  void Http_Context_FastCGI_Impl::send_service_unavailable(const char *path_info) {
+    puts("Status: 503 Service Unavailable\r\n");
+    puts("Content-Type: text/html\r\n\r\n");
+    printf("<html><body><h1>503 Service Unavailable</h1>"
+	   "The requested resource %s is Unavailable.</body></html>", path_info);
+  }
+
   /// FastCGI サービスの実装
   class FastCGI_Service_Impl : public Service, ELog, Property {
     string socket_name, service_name;
@@ -365,6 +477,7 @@ namespace fcgi {
     void destroy_all_servlet();
     void load_servlet();
 
+#ifdef THREAD_SUPPORT
     /// スレッド処理用
     struct Worker {
       Http_Context_FastCGI_Impl *con;
@@ -378,6 +491,7 @@ namespace fcgi {
       }
     };
     boost::threadpool::pool thread_pool;
+#endif
 
   public:
     FastCGI_Service_Impl();
@@ -397,14 +511,33 @@ namespace fcgi {
 
   static vector<Service *> services;
 
+  static void (*int_cascade)(int signum) = 0;
+  static void (*term_cascade)(int signum) = 0;
+
   static void int_handler(int signum) {
+    static int count = 0;
     vector<Service *>::iterator it = services.begin();
     while (it != services.end()) { (*it)->stop(); it++; }
     fputs("interupted!\n",stderr);
+
+    if (int_cascade) (*int_cascade)(signum);
+    if (++count == 3) {
+      fputs("terminating.\n",stderr);
+      exit(1);
+    }
+  }
+
+  static void term_handler(int signum) {
+    vector<Service *>::iterator it = services.begin();
+    while (it != services.end()) { (*it)->stop(); it++; }
+    fputs("terminateing.\n",stderr);
   }
 
   FastCGI_Service_Impl::FastCGI_Service_Impl()
-    : start_time(0), back_logs(50), status("init"), stop_flag(false), thread_pool(32)
+    : start_time(0), back_logs(50), status("init"), stop_flag(false)
+#ifdef THREAD_SUPPORT
+    , thread_pool(32)
+#endif
   {
     init_elog("FastCGI_Service_Impl");
   }
@@ -506,6 +639,13 @@ namespace fcgi {
       return;
     }
 
+#if 0
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+      elog(W, "fcntl failed:(%d):%s\n",errno,strerror(errno));
+    }
+#endif
+
     if (socket_path[0] != ':') {// is unix domain socket
       struct stat sbuf;
       if (stat(socket_path, &sbuf) == 0) {
@@ -517,14 +657,33 @@ namespace fcgi {
 
     status = "RUNNING";
 
-    elog(I, "service %s started.\n", socket_name.c_str());
+    elog(I, "fcgi-service %s started.\n", socket_name.c_str());
+
+    fd_set readfds;
+    FD_ZERO(&readfds);
 
     while (!stop_flag) {
-      Http_Context_FastCGI_Impl *req = new Http_Context_FastCGI_Impl(fd, 0);
+      FD_SET(fd, &readfds);
+
+      int nbchg = select(fd + 1, &readfds, NULL, NULL, NULL);
+      if (nbchg == -1) {
+	if (errno == EINTR) { break; }
+	elog(W, "select returns non-zero value(%d)\n", nbchg, errno, strerror(errno));
+	break;
+      }
+      if (!FD_ISSET(fd, &readfds)) {
+	elog("internal error.\n", nbchg, errno, strerror(errno));
+	break;
+      }
+
+      Http_Context_FastCGI_Impl *req =
+	new Http_Context_FastCGI_Impl(fd, FCGI_FAIL_ACCEPT_ON_INTR);
+
       int result = req->accept();
       if (result != 0) {
-	elog(W, "accept() returns non-zero value(%d)", result);
+	elog(W, "accept() returns non-zero value(%d)\n", result);
 	delete req;
+	if (errno == EINTR) break;
 	continue;
       }
 
@@ -536,9 +695,14 @@ namespace fcgi {
 	for (; *pi && *pi != '/'; pi++) { context_path += *pi; }
       }
 
+      if (stop_flag) {
+	req->send_service_unavailable(path_info);
+	delete req; break;
+      }
+
       Http_Servlet *serv = find_servlet(context_path.c_str());
       if (serv) {
-#if 1
+#ifdef THREAD_SUPPORT
 	Worker aa(req, serv);
 	thread_pool.schedule(aa);
 #else
@@ -547,10 +711,7 @@ namespace fcgi {
 #endif
       }
       else {
-	req->puts("Status: 404 Not Found\n");
-	req->puts("Content-Type: text/html\n\n");
-	req->printf("<html><body><h1>404 not found</h1>"
-		    "The requested resource %s is not found.</body></html>", path_info);
+	req->send_not_found(path_info);
 	delete req;
       }
     }
@@ -568,7 +729,10 @@ namespace fcgi {
 
     load_servlet();
     signal(SIGPIPE , SIG_IGN);
-    //signal(SIGINT , int_handler);
+
+    int_cascade = signal(SIGINT , int_handler);
+    term_cascade = signal(SIGTERM , term_handler);
+
     stop_flag = false;
 
     run();
@@ -580,6 +744,7 @@ namespace fcgi {
   void FastCGI_Service_Impl::stop() {
     status = "STOPING";
     stop_flag = true;
+    //FCGX_ShutdownPending();
   }
 
   const char *FastCGI_Service_Impl::get_service_status() { return status; }
@@ -632,7 +797,8 @@ namespace fcgi {
     }
 
     int do_request(Http_Context *req) {
-      elog(T,"req %p\n",this);
+      elog(T,"hello. req %p\n",this);
+
       req->printf("Content-type: %s\n\n", "text/plain");
       req->printf("Hello .. %s\n", dd.now().get_date_text().c_str());
 
