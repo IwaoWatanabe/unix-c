@@ -330,7 +330,7 @@ namespace fcgi {
     return dbuf;
   }
 
-  static void splitByAmp(const char *line, vector<string> &ampSplitted) {
+  static void split_by_amp(const char *line, vector<string> &ampSplitted) {
     ampSplitted.clear();
     if (!line || !*line) return;
 
@@ -346,7 +346,7 @@ namespace fcgi {
     ampSplitted.push_back(str);
   }
 
-  static pair<string, string> splitByEq(const char* str) {
+  static pair<string, string> split_by_eq(const char* str) {
 
     pair<string,string> result;
     const char* p;
@@ -367,10 +367,10 @@ namespace fcgi {
 
     vector<string> ampSplitted;
 
-    splitByAmp(line, ampSplitted);
+    split_by_amp(line, ampSplitted);
 
     for (vector<string>::iterator i = ampSplitted.begin(); i != ampSplitted.end(); i++) {
-      pair<string, string> p = splitByEq((*i).c_str());
+      pair<string, string> p = split_by_eq((*i).c_str());
       string name, value;
       name = convert_charset(url_decode(p.first.c_str()), inputEncoding, outputEncoding);
       value = convert_charset(url_decode(p.second.c_str()), inputEncoding, outputEncoding);
@@ -438,6 +438,7 @@ namespace fcgi {
   }
 
   void Http_Context_FastCGI_Impl::send_forbidden(const char *path_info) {
+    if (!path_info) path_info = "";
     puts("Status: 403 Forbidden\r\n");
     puts("Content-Type: text/html\r\n\r\n");
     printf("<html><body><h1>404 not found</h1>"
@@ -445,6 +446,7 @@ namespace fcgi {
   }
 
   void Http_Context_FastCGI_Impl::send_not_found(const char *path_info) {
+    if (!path_info) path_info = "";
     puts("Status: 404 Not Found\r\n");
     puts("Content-Type: text/html\r\n\r\n");
     printf("<html><body><h1>404 not found</h1>"
@@ -452,6 +454,7 @@ namespace fcgi {
   }
 
   void Http_Context_FastCGI_Impl::send_service_unavailable(const char *path_info) {
+    if (!path_info) path_info = "";
     puts("Status: 503 Service Unavailable\r\n");
     puts("Content-Type: text/html\r\n\r\n");
     printf("<html><body><h1>503 Service Unavailable</h1>"
@@ -624,18 +627,23 @@ namespace fcgi {
 
   void FastCGI_Service_Impl::run() {
 
+    elog(I, "fcgi service running ..\n");
+
     status = "INIT";
 
-    if (FCGX_Init()) {
-      elog("FCGX_Init() failed");
+    if (FCGX_Init() != 0) {
+      elog("FCGX_Init() failed\n");
       return;
     }
 
     const char *socket_path = socket_name.c_str();
 
+    elog(T, "socket %s, back-logs: %d\n", socket_path, back_logs);
+
     int fd = FCGX_OpenSocket(socket_path, back_logs);
-    if (fd < 0) {
-      elog("FCGX_OpenSocket(%s) failed : %d", socket_path, fd);
+    if (fd <= 0) {
+      elog("FCGX_OpenSocket(%s) failed : %d\n", socket_path, fd);
+      // bind/listen: Address already in use　の場合は、exit されるので、ここにこない
       return;
     }
 
@@ -689,7 +697,9 @@ namespace fcgi {
 
       string context_path;
       const char* path_info = req->get_path_info();
-      if (path_info) {
+      if (!path_info)
+	path_info = "";
+      else {
 	const char *pi = path_info;
 	if (*pi == '/') pi++;
 	for (; *pi && *pi != '/'; pi++) { context_path += *pi; }
@@ -722,6 +732,8 @@ namespace fcgi {
   }
 
   void FastCGI_Service_Impl::start() {
+    elog(I, "fcgi service starting..");
+
     if (time(&start_time) == (time_t)-1)
       elog(W, "time:(%d):%s\n",errno,strerror(errno));
 
@@ -729,7 +741,6 @@ namespace fcgi {
 
     load_servlet();
     signal(SIGPIPE , SIG_IGN);
-
     int_cascade = signal(SIGINT , int_handler);
     term_cascade = signal(SIGTERM , term_handler);
 
@@ -824,9 +835,11 @@ namespace fcgi {
   };
 
   static int cmd_fcgi(int argc, char **argv) {
+    const char *socket = optind + 1 <= argc ? argv[optind] : ":6100";
+
     Hello_Servlet_Factory hello;
     FastCGI_Service_Impl service;
-    service.set_socket_name(":6100");
+    service.set_socket_name(socket);
     service.start();
     return 0;
   }
