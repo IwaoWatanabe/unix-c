@@ -11,6 +11,9 @@ ALL_MODULE += app03
 ALL_MODULE += app04
 TEST_MODULE = header-test.o
 
+CFLAGS = -g -fexceptions
+CFLAGS += -pthread -D_REENTRANT -DUSE_SUBCMD
+
 LDFLAGS += -lpthread
 ifdef USE_MOTIF
 LDFLAGS += -lXm -lMrm -lUil
@@ -21,8 +24,12 @@ OPENWIN_HOME=/usr/openwin
 LDFLAGS += -L$(OPENWIN_BUILD)/lib/libxview -L$(OPENWIN_BUILD)/lib/libolgx
 LDFLAGS += -L$(OPENWIN_HOME)/lib  -lxview -lolgx
 endif
+ifdef USE_XAW3D
+LDFLAGS += -lXaw3d
+else
 LDFLAGS += -lXaw
-LDFLAGS += -lXt -lXmu -lX11 -lSM -lICE 
+endif
+LDFLAGS += -lXt -lXmu -lX11
 ifdef USE_READLINE
 CXXFLAGS += -DUSE_READLINE
 LDFLAGS += -lreadline -lhistory
@@ -109,7 +116,7 @@ CXXFLAGS += -I$(OPENWIN_HOME)/include -DUSE_XVIEW
 APP04_OBJS += olt.o 
 endif
 
-CXXFLAGS += -I$(HOME)/engine
+CXXFLAGS += -I$(HOME)/buzz/engine
 LDFLAGS += -lboost_thread
 
 libuc.a: $(LIBUC_OBJS)

@@ -30,8 +30,6 @@ extern void show_component_tree(Widget target, int level);
 };
 
 
-/// Xで動作するGUIアプリケーション作成をサポートする
-
 namespace xwin {
 
   /// 基本メニュー項目を定義する構造体
