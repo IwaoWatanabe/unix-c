@@ -46,6 +46,7 @@
 #include <X11/Xaw/Tree.h>
 #include <X11/Xaw/Toggle.h>
 #include <X11/Xaw/Viewport.h>
+#include <X11/Xaw/XawInit.h>
 #include <X11/Xmu/Atoms.h>
 #include <X11/Xmu/Editres.h>
 
@@ -64,6 +65,8 @@ extern int getXawListRows(Widget list);
 extern "C" {
   extern char *trim(char *t);
   extern char *demangle(const char *demangle);
+
+  static void report_action(Widget wi, XEvent *event, String *params, Cardinal *num);
 };
 
 
@@ -532,6 +535,143 @@ namespace {
 
   // --------------------------------------------------------------------------------
 
+  /// イベント受け取りの確認用
+  class Event_View : public Frame {
+    static void event_handler(Widget widget, XtPointer closure, XEvent *event, Boolean *continue_to_dispatch);
+    XIM xim;
+    XIMStyles *xim_styles;
+    XIMStyle xim_style;
+    XIC xic;
+  public:
+    Event_View() : xim(0), xim_styles(0), xim_style(0), xic(0) { }
+    Widget create_contents(Widget shell);
+  };
+
+  class Event_View_Factory : public Frame_Factory {
+    Frame *get_instance() { return new Event_View(); }
+  };
+
+  void Event_View::event_handler(Widget widget, XtPointer closure, XEvent *event, Boolean *continue_to_dispatch) {
+    report_action(widget, event, 0, 0);
+    *continue_to_dispatch = True;
+  }
+
+  Widget Event_View::create_contents(Widget top) {
+    char *modifiers;
+    char *imvalret;
+
+    Widget pane =
+      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
+    Widget menu_bar =
+      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
+
+    Widget close =
+      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
+    XtAddCallback(close, XtNcallback, quit_application, 0);
+
+#define INNER_WINDOW_WIDTH 50
+#define INNER_WINDOW_HEIGHT 50
+#define INNER_WINDOW_BORDER 4
+#define INNER_WINDOW_X 10
+#define INNER_WINDOW_Y 10
+#define OUTER_WINDOW_MIN_WIDTH (INNER_WINDOW_WIDTH + \
+				2 * (INNER_WINDOW_BORDER + INNER_WINDOW_X))
+#define OUTER_WINDOW_MIN_HEIGHT (INNER_WINDOW_HEIGHT + \
+				2 * (INNER_WINDOW_BORDER + INNER_WINDOW_Y))
+#define OUTER_WINDOW_DEF_WIDTH (OUTER_WINDOW_MIN_WIDTH + 100)
+#define OUTER_WINDOW_DEF_HEIGHT (OUTER_WINDOW_MIN_HEIGHT + 100)
+#define OUTER_WINDOW_DEF_X 100
+#define OUTER_WINDOW_DEF_Y 100
+
+    Widget outer =
+      XtVaCreateManagedWidget("event",simpleWidgetClass, pane,
+			      XtNwidth, OUTER_WINDOW_DEF_WIDTH,
+			      XtNheight, OUTER_WINDOW_DEF_HEIGHT, NULL);
+
+    Widget outer2 =
+      XtVaCreateManagedWidget("event02",simpleWidgetClass, pane,
+			      XtNwidth, OUTER_WINDOW_DEF_WIDTH,
+			      XtNheight, OUTER_WINDOW_DEF_HEIGHT, NULL);
+
+
+    XtRealizeWidget(top);
+
+    unsigned long border, background;
+    XtVaGetValues(outer,
+		  XtNforeground, &border,
+		  XtNbackground, &background,
+		  NULL);
+
+    Window subw = XCreateSimpleWindow(XtDisplay(top), XtWindow(outer),
+				      INNER_WINDOW_X, INNER_WINDOW_Y,
+				INNER_WINDOW_WIDTH, INNER_WINDOW_HEIGHT,
+				INNER_WINDOW_BORDER,
+				border, background);
+
+    XMapWindow(XtDisplay(top), subw);
+
+    printf ("Outer window is 0x%lx, inner window is 0x%lx\n", XtWindow(outer), subw);
+
+    xim = XOpenIM (XtDisplay(top), NULL, NULL, NULL);
+    if (xim == NULL) {
+      fprintf (stderr, "XOpenIM failed\n");
+    }
+
+    if (xim) {
+      imvalret = XGetIMValues (xim, XNQueryInputStyle, &xim_styles, NULL);
+      if (imvalret != NULL || xim_styles == NULL) {
+	fprintf (stderr, "input method doesn't support any styles\n");
+      }
+
+      if (xim_styles) {
+	xim_style = 0;
+	for (int i = 0;  i < xim_styles->count_styles;  i++) {
+	  if (xim_styles->supported_styles[i] ==
+	      (XIMPreeditNothing | XIMStatusNothing)) {
+	    xim_style = xim_styles->supported_styles[i];
+	    break;
+	  }
+	}
+
+	if (xim_style == 0) {
+	  fprintf (stderr, "input method doesn't support the style we support\n");
+	}
+	XFree (xim_styles);
+      }
+    }
+
+    EventMask event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask |
+      ButtonReleaseMask | EnterWindowMask |
+      LeaveWindowMask | PointerMotionMask |
+      Button1MotionMask |
+      Button2MotionMask | Button3MotionMask |
+      Button4MotionMask | Button5MotionMask |
+      ButtonMotionMask | KeymapStateMask |
+      ExposureMask | VisibilityChangeMask |
+      StructureNotifyMask | /* ResizeRedirectMask | */
+      SubstructureNotifyMask | SubstructureRedirectMask |
+      FocusChangeMask | PropertyChangeMask |
+      ColormapChangeMask | OwnerGrabButtonMask;
+
+    XtAddEventHandler(outer, event_mask, True, event_handler, NULL);
+
+    if (xim && xim_style) {
+      xic = XCreateIC (xim,
+		       XNInputStyle, xim_style,
+		       XNClientWindow, XtWindow(outer),
+		       XNFocusWindow, XtWindow(outer),
+		       NULL);
+
+      if (xic == NULL) {
+	fprintf (stderr, "XCreateIC failed\n");
+      }
+    }
+
+  }
+
+
+  // --------------------------------------------------------------------------------
+
   /// AWのクラスの継承ツリーを出力する
   class Class_Tree : public Frame {
     /// クラス名とそれを表示するウィジェットの組を保持する
@@ -793,12 +933,13 @@ namespace {
 			      NULL);
     XtAddCallback(viewport, XtNreportCallback, viewport_callback, 0);
     list =
-      XtVaCreateManagedWidget("list", listWidgetClass, viewport,
+      XtVaCreateManagedWidget("fslist", listWidgetClass, viewport,
 			      XtNlist, (XtArgVal)slist,
 			      XtNpasteBuffer, True,
 			      //XtNdefaultColumns, (XtArgVal)1,
 			      NULL);
     XtAddCallback(list, XtNcallback, item_selected, this);
+    XtSetKeyboardFocus(pane, list);
 
     Widget close = 
       XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
@@ -806,6 +947,8 @@ namespace {
 
     XtInstallAccelerators(list, close);
     XtRealizeWidget(top);
+
+
 
     // 初期状態で選択されているようにする
     XawListHighlight(list, 0);
@@ -817,6 +960,24 @@ namespace {
   }
 
   // --------------------------------------------------------------------------------
+
+  /// テキスト・バッファを操作する基本APIを提供する
+  class Text_Buffer {
+    /// カレット位置にテキストを追記する
+    int append_vftext(const char *format,va_list ap);
+    /// カレット位置にテキストを追記する
+    int append_ftext(const char *format, ...);
+    /// カレット位置にテキストを追記する
+    int append_text(const char *text);
+    /// 指定する行に移動する
+    bool goto_line(int row);
+    /// 指定する行に移動する
+    bool set_carret_position(int row, int column);
+    /// カレットの現在位置を入手する
+    bool get_carret_position(int &row, int &column);
+    /// 選択されたテキストを入手する
+    wstring get_selected_text();
+  };
 
   /// AWのクラスの継承ツリーを出力する
   class Editor_Frame : public Frame {
@@ -1117,6 +1278,7 @@ namespace {
     wstring wtext = xwin::load_wtext(__FILE__);
 
     append_text(app->buf, wtext.c_str(), wtext.size());
+    XawTextSetInsertionPoint(app->buf, 0);
 
     // 時刻表示のタイマーを登録
     app->timer =
@@ -1135,13 +1297,12 @@ namespace {
 			    XtNmenuName, "memo-menu",
 			    NULL);
     buf =
-      XtVaCreateManagedWidget("buf", asciiTextWidgetClass, pane,
+      XtVaCreateManagedWidget("textbuf", asciiTextWidgetClass, pane,
 			      XtNeditType, XawtextEdit,
 			      XtNtype, XawAsciiString,
 			      XtNwrap, XawtextWrapWord,
 			      XtNscrollVertical, XawtextScrollWhenNeeded, // or XawtextScrollAlways,
 			      NULL);
-
     XtAddCallback(buf, XtNpositionCallback, position_callback, this);
 
     Widget close =
@@ -1193,13 +1354,15 @@ namespace {
 			      XtNskipAdjust, True, NULL);
 #endif
 
-    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
+    //    XtAddEventHandler(top, NoEventMask, True, _XEditResCheckMessages, NULL);
 
     XtAppContext context = XtWidgetToApplicationContext(top);
 
     XtWorkProcId work = XtAppAddWorkProc(context, text_ready, this);
     cerr << "TRACE: ready proc: " << this << ":" << work << endl;
     cerr << "TRACE: now locale C_TYPE: " << setlocale (LC_CTYPE, 0) << endl;
+
+    XtSetKeyboardFocus(pane, buf);
 
     return 0;
   }
@@ -1218,6 +1381,7 @@ namespace {
       { "ctree", new Class_Tree_Factory(), },
       { "folder", new Folder_List_Factory(), },
       { "memo", new Editor_Frame_Factory(), },
+      { "event", new Event_View_Factory(), },
     };
 
     Frame_Factory *ff = 0;
@@ -1290,28 +1454,67 @@ namespace {
       " <Btn4Down>: StartScroll(Backward)\\n"
       " <Btn5Down>: StartScroll(Forward)\\n",
 
-      "*List.translations: #override "
+      // キー割り当ての確認
+      "*event02.translations: #override "
+      " Ctrl<Key>1: XtDisplayTranslations()\\n"
+      " Ctrl<Key>2: XtDisplayInstalledAccelerators()\\n"
+      " <Key>Up: report(key-Up)\\n"
+      " <Key>Down: report(key-Down)\\n"
+      " <Key>a: report(key-a)\\n"
+      " Ctrl<Key>b: report(key-C-b)\\n"
+      " Ctrl<Key>Return: report(key-C-Return)\\n"
+      " <Key>Return: report(key-Return)\\n"
+      " <Key>Home: report(key-Home)\\n"
+      " <Key>End: report(key-End)\\n"
+      " Ctrl<Key>Home: report(key-C-Home)\\n"
+      " Ctrl<Key>End: report(key-C-End)\\n"
+      " <Key>: report(fallback)\\n"
+      ,
+
+      "*fslist.translations: #override"
+      " Ctrl<Key>1: XtDisplayTranslations()\\n"
+      " Ctrl<Key>2: XtDisplayInstalledAccelerators()\\n"
+      " Ctrl<Key>BackSpace: report(C-backspace) change-item(previous)\\n"
+      " None<KeyPress>BackSpace: change-item(previous) report(backspace)\\n"
+      " None<KeyPress>Right: change-item(next)\\n"
+      " None<KeyPress>Left: change-item(previous)\\n"
+      " <KeyPress>Up: change-item(above)\\n"
+      " <KeyPress>Down: change-item(below)\\n"
+      " <Btn1Down>: Set() Notify() \\n"
+      " Ctrl <Btn3Down>: XawPositionSimpleMenu(list-menu) XtMenuPopup(list-menu)\\n"
+      " Ctrl<Key>BackSpace: report(C-BackSpace)\\n"
+      " :Ctrl<Key>BackSpace: report(:C-BackSpace)\\n"
       " Ctrl<Key>f: change-item(next)\\n"
       " Ctrl<Key>b: change-item(previous)\\n"
-      " <Key>Right: change-item(next)\\n"
-      " <Key>Left: change-item(previous)\\n"
-      " <Key>Up: change-item(above)\\n"
-      " <Key>Down: change-item(below)\\n"
-      " <Btn1Down>: Set() Notify() \\n"
-      " Ctrl <Btn3Down>: XawPositionSimpleMenu(list-menu) XtMenuPopup(list-menu)\\n",
-
+      " Ctrl<Key>p: change-item(above)\\n"
+      " Ctrl<Key>n: change-item(below)\\n"
+      " <Key>BackSpace: report(BackSpace)\\n"
+      " <Key>: report(key-fallback-report)\\n"
+      ,
 
       "*inputMethod: kinput2",
       "*font: -adobe-helvetica-bold-r-*-*-34-*-*-*-*-*-*-*",
       "*preeditType: OverTheSpot,OffTheSpot,Root",
       "*cursorColor: red",
 
-      "*buf.width: 500",
-      "*buf.height: 300",
-      "*buf.textSource.enableUndo: True",
+      "*textbuf.width: 500",
+      "*textbuf.height: 300",
+      "*textbuf.textSource.enableUndo: True",
       "*sub-menu.menuName: memo-submenu",
-
+#if 0
       "*Text.translations: #override "
+      " <Key>Right: forward-character()\\n"
+      " <Key>Left: backward-character()\\n"
+      " <Key>Down: next-line()\\n"
+      " <Key>Up: previous-line()\\n"
+      " <Key>KP_Down: next-line()\\n"
+      " <Key>KP_Up: previous-line()\\n"
+      " <Key>KP_Right: forward-character()\\n"
+      " <Key>KP_Left: backward-character()\\n"
+      " <Key>Home: beginning-of-file()\\n"
+      " <Key>End: end-of-file()\\n"
+      " <Key>Next: next-page()\\n"
+      " <Key>Prior: previous-page()\\n"
       "Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
       "Ctrl<Key>Right: forward-word()\\n"
       "Ctrl<Key>Left: backward-word()\\n"
@@ -1321,17 +1524,23 @@ namespace {
       "<Key>End: end-of-file()\\n"
       "<Key>Next: next-page()\\n"
       "<Key>Prior: previous-page()\\n",
+#endif
 
-      "*buf.translations: #override "
+      "*textbuf.translations: #override "
+      " Ctrl<Key>1: XtDisplayTranslations()\\n"
+      " Ctrl<Key>2: XtDisplayInstalledAccelerators()\\n"
+      " Ctrl<Key>F2: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+#if 0
+      " Ctrl<Key>space: select-start()\\n"
+      " Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
+      " <Key>BackSpace: delete-previous-character()\\n"
+      " <Key>Right: forward-character()\\n"
+      " <Key>Left: backward-character()\\n"
       " Shift<Key>Insert: insert-selection(PRIMARY, CUT_BUFFER0)\\n"
       " Ctrl<Key>Right: forward-word()\\n"
       " Ctrl<Key>Left: backward-word()\\n"
-      " Ctrl<Key>space: select-start()\\n"
-      " Shift<Key>Right: forward-character()select-adjust()extend-end(PRIMARY, CUT_BUFFER0)\\n"
-      " <Key>Home: beginning-of-file()\\n"
-      " <Key>End: end-of-file()\\n"
-      " <Key>Next: next-page()\\n"
-      " <Key>Prior: previous-page()\\n"
+      " <Key>: insert-char() report(text-fallback)\\n"
+#endif
       " Shift<Btn4Down>,<Btn4Up>: scroll-one-line-down()\\n"
       " Shift<Btn5Down>,<Btn5Up>: scroll-one-line-up()\\n"
       " Ctrl<Btn4Down>,<Btn4Up>: previous-page()\\n"
@@ -1340,9 +1549,9 @@ namespace {
         "scroll-one-line-down()scroll-one-line-down()\\n"
       " <Btn5Down>,<Btn5Up>:scroll-one-line-up()scroll-one-line-up()scroll-one-line-up()"
         "scroll-one-line-up()scroll-one-line-up()\\n"
-      " Ctrl<Key>F2: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
       " Ctrl<Btn1Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
-      " Ctrl<Btn3Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n",
+      " Ctrl<Btn3Down>: XawPositionSimpleMenu(text-shortcut) XtMenuPopup(text-shortcut)\\n"
+      ,
 
 #if 0
       "*menu_bar.translations: #override "
@@ -1381,6 +1590,7 @@ namespace {
     static XtActionsRec actions[] = {
       { "change-item", change_item_action, },
       { "popup-shortcut", popup_action, },
+      { "report", report_action, },
     };
 
     {
@@ -1396,6 +1606,8 @@ namespace {
     top_level_shell =
       XtVaAppInitialize(&context, app_class, options, XtNumber(options),
 			&argc, argv, fallback_resouces, NULL);
+
+    XawInitializeWidgetSet();
 
     XawSimpleMenuAddGlobalActions(context);
 
@@ -1557,6 +1769,10 @@ namespace {
 
 };
 
+extern "C" {
+#include "xev.c"
+};
+
 // --------------------------------------------------------------------------------
 
 #include "subcmd.h"
@@ -1571,6 +1787,7 @@ subcmd awt_cmap[] = {
   { "folder", awt_app01, },
   { "memo", awt_app01, },
   { "awt", awt_app01, },
+  { "event", awt_app01, },
   { 0 },
 };
 
