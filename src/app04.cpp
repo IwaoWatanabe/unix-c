@@ -193,6 +193,9 @@ int main(int argc, char **argv) {
   extern subcmd fcgi_cmap[];
   subcmd_add(fcgi_cmap);
 
+  extern subcmd dir_cmap[];
+  subcmd_add(dir_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }

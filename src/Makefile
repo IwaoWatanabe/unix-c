@@ -40,6 +40,7 @@ LDFLAGS += -lgdbm
 LDFLAGS += -lqdbm
 LDFLAGS += -lmecab -lsenna
 LDFLAGS += -lfcgi
+LDFLAGS += -lldap
 
 ifdef USE_DB_DBM
 CXXFLAGS += -DDB_DBM_HSEARCH=1
@@ -51,6 +52,7 @@ LDFLAGS += `xml2-config --libs`
 
 CXXFLAGS += `mysql_config --cflags`
 LDFLAGS += `mysql_config --libs_r`
+CXXFLAGS += -DLDAP_DEPRECATED=1
 
 VERSION=0.1.0
 RPMBASE=~/rpm/SOURCES
@@ -97,6 +99,7 @@ LIBUC_OBJS += index.o
 LIBUC_OBJS += userinfo.o
 LIBUC_OBJS += keytool.o
 LIBUC_OBJS += fcgi-service.o
+LIBUC_OBJS += dir.o
 
 APP04_OBJS += xwin.o 
 APP04_OBJS += awt.o
