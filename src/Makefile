@@ -119,7 +119,7 @@ CXXFLAGS += -I$(OPENWIN_HOME)/include -DUSE_XVIEW
 APP04_OBJS += olt.o 
 endif
 
-CXXFLAGS += -I$(HOME)/buzz/engine
+CXXFLAGS += -Iext
 LDFLAGS += -lboost_thread
 
 libuc.a: $(LIBUC_OBJS)
