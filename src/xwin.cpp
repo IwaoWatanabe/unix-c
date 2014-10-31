@@ -91,6 +91,7 @@ namespace xwin {
 };
 
 
+#include <algorithm>
 #include <cerrno>
 #include <clocale>
 #include <cstdio>

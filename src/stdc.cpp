@@ -5,8 +5,13 @@
 #include <clocale>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <memory>
+#include <unistd.h>
+
+#include <langinfo.h>
+#include <libintl.h>
 
 // --------------------------------------------------------------------------------
 

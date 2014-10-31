@@ -21,7 +21,7 @@ namespace uc {
     /// ディレクトリ・スキャンの開始
     virtual bool begin_scan_dir(const char *dir_name, bool skip_hidden_file = true) = 0;
     /// ディレクトリ・エントリの入手(親と自身は含まれない)
-    virtual char *next_entry(struct stat *sbuf = 0, bool follow_link = false) = 0;
+    virtual const char *next_entry(struct stat *sbuf = 0, bool follow_link = false) = 0;
     /// ディレクトリ・スキャンの終了
     virtual void end_scan_dir() = 0;
     /// ディレクトリであるか診断する

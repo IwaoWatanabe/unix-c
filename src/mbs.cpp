@@ -9,6 +9,7 @@
 #include <clocale>
 #include <iconv.h>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -207,7 +208,7 @@ namespace {
 
 static int testIconv(int argc,char **argv) {
 
-  setlocale(LC_ALL, "");
+  ::setlocale(LC_ALL, "");
 
   auto_ptr<mbsconv> conv(mbsconv::createConvertHelper("EUC-JP-MS"));
 

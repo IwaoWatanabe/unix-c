@@ -170,6 +170,9 @@ using namespace std;
 #include <cstdlib>
 #include <dirent.h>
 #include <fcntl.h>
+#include <limits.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include "uc/elog.hpp"
@@ -177,7 +180,7 @@ using namespace std;
 #include "uc/local-file.hpp"
 
 #include "db.h"
-#include "depot.h"
+//#include "depot.h"
 #include "senna/senna.h"
 
 extern "C" int ends_with(const char *target, const char *suffix);

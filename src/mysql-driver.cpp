@@ -14,6 +14,7 @@ http://search.net-newbie.com/mysql41/clients.html
 #include "uc/elog.hpp"
 
 #include <assert.h>
+#include <cstdlib>
 #include <map>
 
 using namespace std;

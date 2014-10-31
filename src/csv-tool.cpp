@@ -1,6 +1,8 @@
 
-#include <cstdio>
 #include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 
 #include "csv.hpp"
@@ -43,7 +45,7 @@ namespace {
     char *sep = "";
 
     for (; *row; row++) {
-      char *p = strchr(*row, '"');
+      const char *p = strchr(*row, '"');
       if (!p) p = strchr(*row, '\n');
 
       if(!p)

@@ -22,7 +22,7 @@ namespace uc {
     Date(Date &t) : sec(t.sec), tbuf(t.tbuf) { }
     Date(time_t t) { set_utime(t); }
     Date(int y,int m, int d, bool hold_time_part = true);
-    Date(int y,int m, int d, int h, int m, int s);
+    Date(int y,int m, int d, int hh, int mm, int ss);
 
     /// 日付表現の現在のlocale設定を入手
     static const char *get_locale();
@@ -37,7 +37,7 @@ namespace uc {
     bool set_date(int y,int m, int d, bool hold_time_part = true);
 
     /// 日時の設定値
-    bool set_date_time(int y, int m, int d, int h, int m, int s);
+    bool set_date_time(int y, int m, int d, int hh, int mm, int ss);
 
     bool set_utime(time_t sec);
     time_t get_utime() { return sec; }

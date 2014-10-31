@@ -10,6 +10,8 @@ using namespace std;
 #include <cstdlib>
 #include <clocale>
 
+#include <langinfo.h>
+
 // --------------------------------------------------------------------------------
 
 extern string as_shell_params(int argc, char **argv);
@@ -28,13 +30,13 @@ namespace uc {
 
   /// 文字セット操作の現在のlocale設定
   const char *Text_Source::set_locale(const char *locale) {
-    const char *lctype = setlocale(LC_CTYPE, locale);
+    const char *lctype = ::setlocale(LC_CTYPE, locale);
     if (lctype) {
       fprintf(stderr,"INFO: change loclae (LC_TYPE) to %s (codeset: %s)\n", 
 	      lctype, nl_langinfo(CODESET));
     }
     else {
-      lctype = setlocale(LC_CTYPE, NULL);
+      lctype = ::setlocale(LC_CTYPE, NULL);
       fprintf(stderr,"WARNING: can not change loclae (LC_TYPE) to %s: (use %s)\n", locale, lctype);
     }
     return lctype;

@@ -4,10 +4,12 @@
 
 #include <iostream>
 #include <cstring>
+#include <cstdlib>
 #include <cctype>
 #include <string>
 #include <time.h>
 #include <vector>
+#include <typeinfo>
 
 #include <X11/Intrinsic.h>
 #include <X11/Xmu/Editres.h>

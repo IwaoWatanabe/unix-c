@@ -59,7 +59,7 @@ namespace {
     char *sep = "";
 
     for (; *row; row++) {
-      char *p = strchr(*row, '"');
+      const char *p = strchr(*row, '"');
       if (!p) p = strchr(*row, '\n');
 
       if(!p)

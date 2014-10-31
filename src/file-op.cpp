@@ -18,7 +18,7 @@ namespace {
   public:
     virtual ~Local_File_Nop() { }
     bool begin_scan_dir(const char *dir_name, bool skip_hidden_file = true);
-    char *next_entry(struct stat *sbuf = 0, bool follow_link = false);
+    const char *next_entry(struct stat *sbuf = 0, bool follow_link = false);
     void end_scan_dir();
     bool isdir(const char *dirpath);
     bool mkdirs(const char *dirpath);
@@ -59,7 +59,7 @@ namespace {
     Local_File_Impl(const char *base_dir);
     virtual ~Local_File_Impl();
     bool begin_scan_dir(const char *dir_name, bool skip_hidden_file = true);
-    char *next_entry(struct stat *sbuf = 0, bool follow_link = false);
+    const char *next_entry(struct stat *sbuf = 0, bool follow_link = false);
     void end_scan_dir();
     bool isdir(const char *dirpath);
     bool isfile(const char *filepath);
@@ -200,7 +200,7 @@ namespace {
     入手するエントリがないか、何らかの問題が生じたら NULL が返る。
     処理を中断する場合は end_scan_dir を呼べば
    */
-  char *Local_File_Impl::next_entry(struct stat *sbuf, bool follow_link) {
+  const char *Local_File_Impl::next_entry(struct stat *sbuf, bool follow_link) {
     DIR *tdir = (DIR *)dir;
     if (!tdir) return 0;
 
@@ -272,7 +272,7 @@ namespace {
 	dirp[--len] = 0;
     }
 
-    char *p = strrchr(path, '/');
+    const char *p = strrchr(path, '/');
     if (!p || p == path) return path;
     return p + 1;
   }
@@ -294,7 +294,7 @@ namespace {
 	dirp[--len] = 0;
     }
 
-    char *p = strrchr(path, '/');
+    const char *p = strrchr(path, '/');
     if (!p) return ".";
 
     int pos = p - path;
@@ -387,7 +387,7 @@ namespace {
       return false;
     }
 
-    char *p = strrchr(dirpath, '/');
+    const char *p = strrchr(dirpath, '/');
     if (p) {
       // スラッシュが含まれていれば、その親ディレクトリが有効であるか確認する
       int pos = p - dirpath;
@@ -435,7 +435,7 @@ namespace {
       char *st;
 
       // スラッシュを探して、そこに終端文字を入れる
-      if ((st = strrchr(dirpath, '/')) == NULL) break;
+      if ((st = (char *)strrchr(dirpath, '/')) == NULL) break;
       *st = 0;
     }
     return 0;
@@ -1066,7 +1066,7 @@ namespace uc {
     char *dir = "";
 
     if (fm->begin_scan_dir(dir, false)) {
-      char *ent;
+      const char *ent;
       while ((ent = fm->next_entry())) {
 	puts(ent);
       }

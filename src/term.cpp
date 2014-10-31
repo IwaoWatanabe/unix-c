@@ -2,6 +2,7 @@
  * \brief C/C++の端末制御のサンプルコード
  */
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>

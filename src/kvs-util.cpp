@@ -12,6 +12,7 @@
 #include <iostream>
 #include <typeinfo>
 #include <vector>
+#include <memory>
 
 using namespace std;
 extern int vsprintf(string &buf, const char *format, va_list ap);
@@ -98,12 +99,18 @@ namespace uc {
 
     if (strcasecmp(kvs_type, "bdb") == 0)
       kvs = create_KVS_BDB_Impl();
+#ifndef IGNORE_QDBM
     else if (strcasecmp(kvs_type, "qdbm") == 0 || strcasecmp(kvs_type, "depot") == 0)
       kvs = create_KVS_DEPOT_Impl();
+#endif
+#ifndef IGNORE_NDBM
     else if (strcasecmp(kvs_type, "ndbm") == 0)
       kvs = create_KVS_NDBM_Impl();
+#endif
+#ifndef IGNORE_GDBM
     else if (strcasecmp(kvs_type, "gdbm") == 0)
       kvs = create_KVS_GDBM_Impl();
+#endif
     else
       kvs = create_KVS_BDB_Impl();
 

@@ -59,8 +59,9 @@ namespace uc {
 
 #include "libxml/tree.h"
 
-#include <cstdio>
 #include <cerrno>
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <sys/stat.h>
 #include <sys/types.h>

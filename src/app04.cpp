@@ -1,5 +1,7 @@
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <csetjmp>
 #include <csignal>
 #include <execinfo.h>
@@ -172,8 +174,10 @@ int main(int argc, char **argv) {
   extern subcmd lineop_cmap[];
   subcmd_add(lineop_cmap);
 
+#ifndef NOUSE_INDEX
   extern subcmd index_cmap[];
   subcmd_add(index_cmap);
+#endif
 
   extern subcmd xml_cmap[];
   subcmd_add(xml_cmap);
@@ -190,8 +194,10 @@ int main(int argc, char **argv) {
   extern subcmd key_cmap[];
   subcmd_add(key_cmap);
 
+#ifndef NOUSE_FCGI
   extern subcmd fcgi_cmap[];
   subcmd_add(fcgi_cmap);
+#endif
 
   extern subcmd dir_cmap[];
   subcmd_add(dir_cmap);

@@ -5,6 +5,7 @@
 #include "uc/userinfo.hpp"
 #include "uc/elog.hpp"
 
+#include <cstdlib>
 #include <map>
 #include <string>
 

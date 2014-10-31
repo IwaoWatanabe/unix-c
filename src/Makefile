@@ -14,6 +14,8 @@ TEST_MODULE = header-test.o
 CFLAGS = -g -fexceptions
 CFLAGS += -pthread -D_REENTRANT -DUSE_SUBCMD
 
+CXXFLAGS += -DIGNORE_NDBM -DIGNORE_GDBM
+
 LDFLAGS += -lpthread
 ifdef USE_MOTIF
 LDFLAGS += -lXm -lMrm -lUil
@@ -22,7 +24,7 @@ ifdef USE_XVIEW
 CXXFLAGS += -DUSE_XVIEW
 OPENWIN_HOME=/usr/openwin
 LDFLAGS += -L$(OPENWIN_BUILD)/lib/libxview -L$(OPENWIN_BUILD)/lib/libolgx
-LDFLAGS += -L$(OPENWIN_HOME)/lib  -lxview -lolgx
+LDFLAGS += -L$(OPENWIN_HOME)/lib -lxview -lolgx
 endif
 ifdef USE_XAW3D
 LDFLAGS += -lXaw3d
@@ -36,10 +38,6 @@ LDFLAGS += -lreadline -lhistory
 endif
 LDFLAGS += -lncursesw
 LDFLAGS += -ldb
-LDFLAGS += -lgdbm
-LDFLAGS += -lqdbm
-LDFLAGS += -lmecab -lsenna
-LDFLAGS += -lfcgi
 LDFLAGS += -lldap
 
 ifdef USE_DB_DBM
@@ -80,6 +78,7 @@ app03: $(APP03_OBJS)
 
 APP04_OBJS = app04.o
 APP04_OBJS += temp.o
+
 LIBUC_OBJS = subcmd.o 
 LIBUC_OBJS += datetime.o
 LIBUC_OBJS += times.o logger.o ini.o datetime.o
@@ -89,20 +88,40 @@ LIBUC_OBJS += stdc.o stl.o
 LIBUC_OBJS += term.o
 LIBUC_OBJS += xml.o
 LIBUC_OBJS += kvs-util.o kvs-bdb.o
-LIBUC_OBJS += kvs-ndbm.o
-LIBUC_OBJS += kvs-gdbm.o
-LIBUC_OBJS += kvs-qdbm.o
 LIBUC_OBJS += mysql-driver.o mysql-tool.o
 LIBUC_OBJS += xt-proc.o
 LIBUC_OBJS += awt-util.o SmeCascade.o
-LIBUC_OBJS += index.o
 LIBUC_OBJS += userinfo.o
 LIBUC_OBJS += keytool.o
-LIBUC_OBJS += fcgi-service.o
 LIBUC_OBJS += dir.o
 
 APP04_OBJS += xwin.o 
 APP04_OBJS += awt.o
+
+
+ifdef USE_FCGI
+LIBUC_OBJS += fcgi-service.o
+LDFLAGS += -lfcgi
+CXXFLAGS += -Iext
+LDFLAGS += -lboost_thread
+else
+CXXFLAGS += -DNOUSE_FCGI
+endif
+
+ifdef USE_QDBM
+LIBUC_OBJS += kvs-qdbm.o
+LDFLAGS += -lqdbm
+else
+CXXFLAGS += -DIGNORE_QDBM
+endif
+
+#LIBUC_OBJS += kvs-ndbm.o
+#LIBUC_OBJS += kvs-gdbm.o
+#LDFLAGS += -lgdbm
+
+#CXXFLAGS += -DNOUSE_INDEX
+LIBUC_OBJS += index.o
+LDFLAGS += -lmecab -lsenna
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF
@@ -118,9 +137,6 @@ ifdef USE_XVIEW
 CXXFLAGS += -I$(OPENWIN_HOME)/include -DUSE_XVIEW
 APP04_OBJS += olt.o 
 endif
-
-CXXFLAGS += -Iext
-LDFLAGS += -lboost_thread
 
 libuc.a: $(LIBUC_OBJS)
 	$(AR) r $@ $(LIBUC_OBJS)

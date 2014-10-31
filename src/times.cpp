@@ -5,6 +5,7 @@
 #include "datetime.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <cerrno>
 #include <iostream>
 #include <string>
