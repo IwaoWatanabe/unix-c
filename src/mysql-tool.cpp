@@ -13,7 +13,8 @@
 #include <memory>
 #include <string>
 #include <vector>
-
+#include <unistd.h>
+#include <libgen.h>
 
 
 extern uc::Local_Text_Source *create_Local_Text_Source();

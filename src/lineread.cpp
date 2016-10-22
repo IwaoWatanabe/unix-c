@@ -9,6 +9,7 @@ using namespace std;
 #include <cstdarg>
 #include <cstdlib>
 #include <clocale>
+#include <unistd.h>
 
 #include <langinfo.h>
 

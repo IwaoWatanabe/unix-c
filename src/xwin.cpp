@@ -5,6 +5,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 
+#include <libgen.h>
+
 namespace xwin {
 
   /// Xの資源を利用するコードが実装するインタフェース
@@ -47,7 +49,7 @@ namespace xwin {
     /// リソースの登録を解除する
     virtual void remove_resoruce(X_resoruce *res) = 0;
     /// サーバに接続する
-    virtual bool connect(char *display_name = "") = 0;
+    virtual bool connect(const char *display_name = "") = 0;
     /// サーバへの接続を解除する
     virtual void disconnect() = 0;
     /// フレームを登録する
@@ -123,7 +125,7 @@ static void setup_interrupt_handler() {
 /// ウィンドウだけ表示する簡単な例
 static int simple_window(int argc,char **argv) {
 
-  char *display_name = "";
+  const char *display_name = "";
   Display *display = XOpenDisplay(display_name);
   /*
     Xサーバと接続する。接続できなければ NULLが返る。
@@ -211,7 +213,7 @@ namespace xwin {
     /// リソースの登録を解除する
     void remove_resoruce(X_resoruce *res);
     /// サーバに接続する
-    bool connect(char *display_name = "");
+    bool connect(const char *display_name = "");
     /// サーバへの接続を解除する
     void disconnect();
     /// フレームを登録する
@@ -315,7 +317,7 @@ namespace xwin {
     if (pos != frames.end()) frames.erase(pos);
   }
 
-  bool X_server_XlibImpl::connect(char *display_name) {
+  bool X_server_XlibImpl::connect(const char *display_name) {
 
     Display *disp = XOpenDisplay(display_name);
     /*
@@ -464,7 +466,7 @@ namespace {
 
     virtual ~xlib01() {}
     /// サーバに接続
-    virtual bool connect_server(char *display_name = "");
+    virtual bool connect_server(const char *display_name = "");
     /// アプリケーション・ウィンドウを作成
     virtual void create_application_window();
     /// イベントループ
@@ -475,7 +477,7 @@ namespace {
 
   /// Xサーバに接続する
   bool 
-  xlib01::connect_server(char *display_name)
+  xlib01::connect_server(const char *display_name)
   {
     display = XOpenDisplay(display_name);
     /*
@@ -826,7 +828,7 @@ namespace {
     XRectangle overall_ink, overall_logical;
 
     size_t len;
-    wchar_t *ws;
+    const wchar_t *ws;
 
     for (n = 0; (ws = data.get_text(n)); n++) {
       len = wcslen(ws);
@@ -922,7 +924,7 @@ namespace {
     virtual ~xlib03() {}
     
     virtual bool create_input_context(const char *style = "root");
-    virtual void set_window_title(char *title);
+    virtual void set_window_title(const char *title);
     virtual void insert_text(const wchar_t *wbuf);
     
     virtual void set_application_name(char *name, char *class_name);
@@ -959,7 +961,7 @@ namespace {
   /// アプリケーション名を設定し、入力サーバとの通信を確立する
   void xlib03::set_application_name(char *res_name, char *res_class) {
 
-    char *modifier = "";
+    const char *modifier = "";
     if (!XSetLocaleModifiers(modifier))
       cerr << "WARNING: can not set local modifiders." << endl;
 
@@ -1017,7 +1019,7 @@ namespace {
     XGetIMValues(input_method,
 		 XNQueryInputStyle, &im_styles, NULL);
   
-    struct { unsigned long style; char *name; }
+    struct { unsigned long style; const char *name; }
     stlist[] = {
       { XIMPreeditCallbacks, "preedit-callbacks", },
       { XIMPreeditPosition, "preedit-position", },
@@ -1038,7 +1040,7 @@ namespace {
 
     for (int i = 0; i < im_styles->count_styles; i++) {
       st = "\t";
-      char *sp = "";
+      const char *sp = "";
 
       for (size_t j = 0 ; j < sizeof stlist/sizeof stlist[0]; j++) {
 	if ((im_styles->supported_styles[i] & stlist[j].style) == stlist[j].style) {
@@ -1076,9 +1078,9 @@ namespace {
   }
 
   /// ウィンドウ・マネージャのタイトルの設定
-  void xlib03::set_window_title(char *title) {
+  void xlib03::set_window_title(const char *title) {
     XTextProperty prop;
-    int rc = XmbTextListToTextProperty(display,&title,1,XStdICCTextStyle,&prop);
+    int rc = XmbTextListToTextProperty(display,(char **)&title,1,XStdICCTextStyle,&prop);
     if (rc != 0)
       cerr << "WARNING: XmbTextListToTextProperty failed: " << rc <<endl;
     else {

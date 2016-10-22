@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <unistd.h>
 
 using namespace std;
 
@@ -28,7 +29,7 @@ namespace {
     int pw_count, gr_count;
 
   public:
-    User_Info_Impl() : pw_scan(0), gr_scan(0), pw_count(0), gr_count(0) {
+    User_Info_Impl() : pw_count(0), gr_count(0) {
       init_elog("User_Info_Impl");
     }
 
@@ -337,6 +338,42 @@ namespace uc {
 #include <memory>
 
 enum { I = uc::ELog::I };
+
+static const char *nvl(const char *tt) {
+  return tt ? tt : "";
+}
+
+static int putpwent(passwd *ent, FILE *fh) {
+  fprintf(fh,"%s:%s:%d:%d:%s:%s:%s\n",
+	  nvl(ent->pw_name),
+	  nvl(ent->pw_passwd),
+	  ent->pw_uid,
+	  ent->pw_gid,
+	  nvl(ent->pw_gecos),
+	  nvl(ent->pw_dir),
+	  nvl(ent->pw_shell));
+  return 0;
+}
+
+static int putgrent(group *ent, FILE *fh) {
+  fprintf(fh,"%s:%s:%d:",
+	  nvl(ent->gr_name),
+	  nvl(ent->gr_passwd),
+	  ent->gr_gid);
+
+  char **tt = ent->gr_mem;
+  const char *pt = "";
+  if (tt)
+    while (*tt) {
+      fputs(pt, fh);
+      fputs(*tt++, fh);
+      pt = ",";
+    }
+
+  fputs("\n",fh);
+
+  return 0;
+}
 
 /// ユーザ・エントリの検索
 static int getpwent01(int argc, char **argv) {

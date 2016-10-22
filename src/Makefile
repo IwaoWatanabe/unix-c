@@ -1,8 +1,21 @@
 
+# Darwin=1 make  on MacOS X
+
 CXXFLAGS = -g -fexceptions
 CXXFLAGS += -fPIC
 CXXFLAGS += -pthread -D_REENTRANT -DUSE_SUBCMD
-LDFLAGS= -lstdc++ 
+
+LDFLAGS = -lstdc++ 
+
+ifdef Darwin
+CFLAGS += -I/opt/X11/include
+CPPFLAGS += -I/opt/X11/include
+LDFLAGS += -L/opt/X11/lib
+
+CPPFLAGS += -I/usr/local/opt/gettext/include
+LDFLAGS += -L/usr/local/opt/gettext/lib
+endif
+
 ALL_MODULE =hello cat01
 ALL_MODULE += app01
 ALL_MODULE += app02
@@ -17,6 +30,7 @@ CFLAGS += -pthread -D_REENTRANT -DUSE_SUBCMD
 CXXFLAGS += -DIGNORE_NDBM -DIGNORE_GDBM
 
 LDFLAGS += -lpthread
+
 ifdef USE_MOTIF
 LDFLAGS += -lXm -lMrm -lUil
 endif
@@ -40,9 +54,19 @@ LDFLAGS += -lncursesw
 LDFLAGS += -ldb
 LDFLAGS += -lldap
 
+ifdef Darwin
+LDFLAGS += -lintl
+LDFLAGS += -liconv
+LDFLAGS += -L/usr/local/opt/ncurses/lib
+CPPFLAGS += -I/usr/local/opt/ncurses/include
+LDFLAGS += -L/usr/local/opt/berkeley-db4/lib
+CPPFLAGS += -I/usr/local/opt/berkeley-db4/include
+endif
+
 ifdef USE_DB_DBM
 CXXFLAGS += -DDB_DBM_HSEARCH=1
 endif
+
 
 
 CXXFLAGS += `xml2-config --cflags`
@@ -115,13 +139,18 @@ else
 CXXFLAGS += -DIGNORE_QDBM
 endif
 
-#LIBUC_OBJS += kvs-ndbm.o
-#LIBUC_OBJS += kvs-gdbm.o
-#LDFLAGS += -lgdbm
+ifdef Darwin
+CXXFLAGS += -DNOUSE_INDEX
+endif
 
-#CXXFLAGS += -DNOUSE_INDEX
+ifndef Darwin
+LIBUC_OBJS += kvs-ndbm.o
+LIBUC_OBJS += kvs-gdbm.o
+LDFLAGS += -lgdbm
+
 LIBUC_OBJS += index.o
 LDFLAGS += -lmecab -lsenna
+endif
 
 ifdef USE_MOTIF
 CXXFLAGS += -DUSE_MOTIF

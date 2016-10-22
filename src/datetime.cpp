@@ -128,7 +128,7 @@ namespace uc {
 
   string 
   Date::get_date_text(int style) {
-    char *iso = "%Y-%m-%d %H:%M:%S";
+    const char *iso = "%Y-%m-%d %H:%M:%S";
     return get_date_text(iso);
   }
   
@@ -146,7 +146,7 @@ namespace {
 
   /// 動作開始
   int testapp1::run(int argc, char **argv) {
-    char *format = "%Y-%m-%d %H:%M:%S";
+    const char *format = "%Y-%m-%d %H:%M:%S";
     printf("Locale: %s\n", get_locale());
     printf("Now: %s - %s\n", get_date_text().c_str(), get_date_text(format).c_str());
 

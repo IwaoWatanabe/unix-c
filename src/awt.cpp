@@ -1373,6 +1373,7 @@ namespace {
   // --------------------------------------------------------------------------------
 
   /// Athena Widget Set を使うアプリケーションコンテナの利用開始
+
   static int awt_app01(int argc, char **argv) {
 
     struct { char *name; Frame_Factory *ff; } fflist[] = {
@@ -1644,7 +1645,7 @@ namespace {
   static void xatom_initialize(Display *display) {
     struct {
       Atom *atom_ptr;
-      char *name;
+      const char *name;
     } ptr_list[] = {
       { &WM_PROTOCOLS, "WM_PROTOCOLS", },
       { &WM_DELETE_WINDOW, "WM_DELETE_WINDOW", },

@@ -14,6 +14,8 @@
 #include <vector>
 #include <memory>
 
+#include <unistd.h>
+
 using namespace std;
 extern int vsprintf(string &buf, const char *format, va_list ap);
 

@@ -297,9 +297,11 @@ namespace uc {
     }
     return ct;
   }
+
 };
 
-ELog::ELog app_log(get_process_name());
+
+static uc::ELog app_log(get_process_name());
 
 /// プロセス汎用のログ出力
 extern int elog(const char *format, ...) {

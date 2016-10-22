@@ -65,7 +65,7 @@ namespace term {
       int idx = i;
       for (int j = 0; j < cols; j++, idx += step) {
 	if (idx >= enties.size()) continue;
-	fprintf(fp, "%s%*s", enties[idx].c_str(), width - enties[idx].size(), " ");
+	fprintf(fp, "%s%*s", enties[idx].c_str(), (int)(width - enties[idx].size()), " ");
       }
       putc('\n', fp);
     }
