@@ -64,6 +64,7 @@ extern "C" {
   /// ウィジェットを破棄するワーク処理
   Boolean dispose_work_proc(XtPointer closure) {
     Widget w = (Widget)closure;
+
     if (XtIsApplicationShell(w)) {
       if (--app_shell_count <= 0) 
 	XtAppSetExitFlag(XtWidgetToApplicationContext(w));
@@ -72,6 +73,7 @@ extern "C" {
     cerr << "TRACE: disposing .. " << XtName(w) << endl;
     XtDestroyWidget(w);
     cerr << "TRACE: dispose end" << endl;
+    return True;
   }
 
   /// シェルを入手する
