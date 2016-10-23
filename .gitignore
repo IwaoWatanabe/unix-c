@@ -9,3 +9,4 @@
 *.uid
 work
 tmp
+*.dSYM
