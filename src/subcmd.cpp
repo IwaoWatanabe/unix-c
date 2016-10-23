@@ -94,6 +94,8 @@ extern "C" {
       }
     }
 
+    subcmd_show2(cmap_ptr, cmap_len, stderr);
+
     fprintf(stderr, "ERROR: no such sub command.\n");
     return -1;
   }
