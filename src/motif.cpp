@@ -380,7 +380,7 @@ namespace {
     int get_command_entries(vector<string> &items);
     bool command_notify(wchar_t *wcs, XmCommandCallbackStruct *cbs);
 
-    string get_selection_label() { "Months"; }
+    string get_selection_label() { return "Months"; }
     int get_selection_entries(vector<string> &items);
     bool selection_notify(wchar_t *wcs, XmSelectionBoxCallbackStruct *cbs);
 
@@ -608,7 +608,7 @@ namespace {
   }
 
   int Parts_Frame::get_command_entries(vector<string> &items) {
-    static char *days[] = {
+    static const char *days[] = {
       "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 0};
     return store(days, items);
   }
@@ -679,7 +679,7 @@ namespace {
   }
 
   int Parts_Frame::get_selection_entries(vector<string> &items) {
-    static char *months[] = {
+    static const char *months[] = {
       "January", "February", "March", "April", "May", "June",
       "July", "August", "September", "October", "November", "December", 0, };
     return store(months, items);
@@ -788,7 +788,7 @@ namespace {
 
   void Parts_Frame::tree_menu_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     cerr << "TRACE: " << XtName(widget) << " selected." << endl;
-    String app_class = "Tree";
+    String const app_class = "Tree";
     Widget top = XtVaAppCreateShell(NULL, app_class, applicationShellWidgetClass, 
 				    XtDisplay(XtParent(widget)), NULL);
     app_shell_count++;
