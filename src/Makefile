@@ -1,5 +1,5 @@
 
-# Darwin=1 make  on MacOS X
+# make Darwin=1  # for MacOS X
 
 CXXFLAGS = -g -fexceptions
 CXXFLAGS += -fPIC
@@ -11,9 +11,12 @@ ifdef Darwin
 CFLAGS += -I/opt/X11/include
 CPPFLAGS += -I/opt/X11/include
 LDFLAGS += -L/opt/X11/lib
+CXXFLAGS += -DDARWIN
 
 CPPFLAGS += -I/usr/local/opt/gettext/include
 LDFLAGS += -L/usr/local/opt/gettext/lib
+
+CXXFLAGS += -Wno-c++11-compat-deprecated-writable-strings
 endif
 
 ALL_MODULE =hello cat01
@@ -34,6 +37,8 @@ LDFLAGS += -lpthread
 ifdef USE_MOTIF
 LDFLAGS += -lXm -lMrm -lUil
 endif
+
+
 ifdef USE_XVIEW
 CXXFLAGS += -DUSE_XVIEW
 OPENWIN_HOME=/usr/openwin
@@ -121,6 +126,8 @@ LIBUC_OBJS += dir.o
 
 APP04_OBJS += xwin.o 
 APP04_OBJS += awt.o
+APP04_OBJS += xwin02.o 
+APP04_OBJS += awt02.o 
 
 
 ifdef USE_FCGI

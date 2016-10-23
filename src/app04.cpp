@@ -202,6 +202,12 @@ int main(int argc, char **argv) {
   extern subcmd dir_cmap[];
   subcmd_add(dir_cmap);
 
+  extern subcmd dxwin_cmap[];
+  subcmd_add(dxwin_cmap);
+
+  extern subcmd dawt_cmap[];
+  subcmd_add(dawt_cmap);
+
   int rc = subcmd_run(argc, argv);
   return rc;
 }
