@@ -65,6 +65,7 @@ namespace xwin {
 
 extern "C" {
   extern char *demangle(const char *demangle);
+  static void report_action(Widget wi, XEvent *event, String *params, Cardinal *num);
 
   /// 地域時間を入手する
   static void fetch_localtime(struct tm *local) {
@@ -132,11 +133,12 @@ namespace awt {
     struct Simple_Menu_Item *sub_menu;
   };
 
-  class Apps {
+  class App {
   protected:
     AppContainer *ac;
-    Apps();
+    App();
     virtual void disposeShell(Widget wi);
+    virtual void release() { }
 
   public:
     static void item_selected(Widget widget, XtPointer client_data, XtPointer call_data);
@@ -145,7 +147,7 @@ namespace awt {
     static void porthole_callback(Widget porthole, XtPointer closure, XtPointer data);
     static void viewport_callback(Widget porthole, XtPointer closure, XtPointer data);
 
-    virtual ~Apps() { }
+    virtual ~App() { }
     virtual void setContainer(AppContainer *container) { ac = container; }
     virtual void command_proc(string &cmd, Widget widget);
     virtual void popup_notify(Widget widget) { }
@@ -185,20 +187,21 @@ namespace awt {
     static void close_dialog(Widget widget, XtPointer client_data, XtPointer call_data);
     static void install_accelerators(Widget parent, const char *name);
     static void clear_dialog_text_proc( Widget widget, XtPointer client_data, XtPointer call_data);
+    static void delete_app_proc( Widget widget, XtPointer client_data, XtPointer call_data);
 
   public:
     XtAppContext app_context;
     static void popup_dialog(Widget target, Widget shell, XtGrabKind kind);
     AppContainer();
-    virtual Widget create_popup_menu(String menu_name, Apps *app, Widget owner, Simple_Menu_Item *items);
-    virtual Widget message_dialog(String prompt, String apply_name, Apps *app, Widget owner);
-    virtual Widget input_dialog(String prompt, String defaultValue, String apply_name, Apps *app, Widget owner);
-
     virtual ~AppContainer();
-    virtual int run(int &argc, char **argv, Apps *app);
+    virtual Widget create_popup_menu(String menu_name, App *app, Widget owner, Simple_Menu_Item *items);
+    virtual Widget message_dialog(String prompt, String apply_name, App *app, Widget owner);
+    virtual Widget input_dialog(String prompt, String defaultValue, String apply_name, App *app, Widget owner);
+    virtual Widget open_app(App *app, Display *diplay);
+    virtual int run(int &argc, char **argv, App *app);
   };
 
-  Apps::Apps():ac(0) { }
+  App::App():ac(0) { }
 
   static String _fallback_resouces[] = {
     "Message.geometry: 300x200",
@@ -303,33 +306,34 @@ namespace awt {
     グローバル変数とするか、static　修飾を指定する。
   */
 
-  String *Apps::loadFallbackResouces() {
+  String *App::loadFallbackResouces() {
     return _fallback_resouces;
   }
 
-  XrmOptionDescRec *Apps::getAppOptions(Cardinal &n_options) {
+  XrmOptionDescRec *App::getAppOptions(Cardinal &n_options) {
     static XrmOptionDescRec options[] = { };
     n_options = XtNumber(options);
     return options;
   }
 
   /// トップレベル・シェルを破棄する
-  void Apps::disposeShell(Widget wi) {
+  void App::disposeShell(Widget wi) {
+    release();
     dispose_shell(wi);
   }
 
-  void Apps::command_proc(string &cmd, Widget widget) {
+  void App::command_proc(string &cmd, Widget widget) {
     if (cmd == "close")
       disposeShell(widget);
   }
 
-  void Apps::item_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void App::item_selected(Widget widget, XtPointer client_data, XtPointer call_data) {
     string cmd = XtName(widget);
-    ((Apps *)client_data)->command_proc(cmd, widget);
+    ((App *)client_data)->command_proc(cmd, widget);
   }
 
   /// pannaer が操作されたタイミングで portholeのウィジェットの位置を変えるためのコールバック
-  void Apps::panner_callback (Widget panner,XtPointer closure,XtPointer data) {
+  void App::panner_callback (Widget panner,XtPointer closure,XtPointer data) {
     XawPannerReport *rep = (XawPannerReport *)data;
     Widget target = (Widget)closure;
     Arg args[2];
@@ -340,7 +344,7 @@ namespace awt {
   }
 
   /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
-  void Apps::porthole_callback(Widget porthole, XtPointer closure, XtPointer data) {
+  void App::porthole_callback(Widget porthole, XtPointer closure, XtPointer data) {
     Widget panner = (Widget) closure;
     XawPannerReport *rep = (XawPannerReport *)data;
     Arg args[6];
@@ -360,7 +364,7 @@ namespace awt {
   }
 
   /// portholeの大きさが変わったときに、pannerの大きさを調整するためのコールバック
-  void Apps::viewport_callback(Widget porthole, XtPointer closure, XtPointer data) {
+  void App::viewport_callback(Widget porthole, XtPointer closure, XtPointer data) {
     XawPannerReport *rep = (XawPannerReport *)data;
 
     cerr << "TRACE: y:" << rep->slider_y << " x:" << rep->slider_x
@@ -414,10 +418,15 @@ namespace awt {
   AppContainer::AppContainer():app_context(0),sr(0) { }
 
   AppContainer::~AppContainer() {
-    if (sr) delete sr;
+    delete sr;
   }
 
-  int AppContainer::run(int &argc, char **argv, Apps *app) {
+  void AppContainer::delete_app_proc(Widget widget, XtPointer client_data, XtPointer call_data) {
+    App *app = (App*)client_data;
+    delete app;
+  }
+
+  int AppContainer::run(int &argc, char **argv, App *app) {
 
     XtSetLanguageProc(NULL, NULL, NULL);
     {
@@ -430,6 +439,7 @@ namespace awt {
       Widget top =
 	XtVaOpenApplication(&app_context, app_class, options, n_options,
 			    &argc, argv, fallback_resouces, applicationShellWidgetClass, NULL);
+      app_shell_count++;
 
       XawSimpleMenuAddGlobalActions(app_context);
 
@@ -440,7 +450,7 @@ namespace awt {
       static XtActionsRec actions[] = {
 	{ "change-item", change_item_action, },
 	{ "popup-shortcut", popup_action, },
-	//	{ "report", report_action, },
+	{ "report", report_action, },
       };
 
       XtAppAddActions(app_context, actions, XtNumber(actions));
@@ -449,14 +459,14 @@ namespace awt {
       app->createWidgets(top);
       XtRealizeWidget(top);
 
-      _ServerResouece *sr = new _ServerResouece();
+      if (!sr) sr = new _ServerResouece();
       sr->atom_initialize(XtDisplay(top));
       sr->register_wm_hander(top);
+
+      XtAddCallback(top, XtNdestroyCallback, delete_app_proc, app);
     }
 
     XtAppMainLoop(app_context);
-
-    delete app;
 
     return 0;
   }
@@ -599,17 +609,17 @@ namespace awt {
 
   void AppContainer::menu_popup_proc( Widget item, XtPointer client_data, XtPointer call_data) {
     cout << "TRACE: " << XtName(item) << " popup" << endl;
-    ((Apps *)client_data)->popup_notify(item);
+    ((App *)client_data)->popup_notify(item);
   }
 
   void AppContainer::menu_popdown_proc( Widget item, XtPointer client_data, XtPointer call_data) {
     cout << "TRACE: " << XtName(item) << " popdown" << endl;
-    ((Apps *)client_data)->popdown_notify(item);
+    ((App *)client_data)->popdown_notify(item);
   }
 
   /** AWのポップアップメニューを作成する
    */
-  Widget AppContainer::create_popup_menu(String menu_name, Apps *app, Widget shell, Simple_Menu_Item *items) {
+  Widget AppContainer::create_popup_menu(String menu_name, App *app, Widget shell, Simple_Menu_Item *items) {
 
     Widget menu =
       XtVaCreatePopupShell( menu_name, simpleMenuWidgetClass, shell, NULL );
@@ -657,7 +667,7 @@ namespace awt {
   }
 
   // モーダルダイアログとして表示する（ただし無関係な他のウィンドウとは非排他的)
-  void Apps::open_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void App::open_dialog(Widget widget, XtPointer client_data, XtPointer call_data) {
     Widget shell = (Widget)client_data;
     AppContainer::popup_dialog(widget, shell, XtGrabNonexclusive);
   }
@@ -681,7 +691,7 @@ namespace awt {
   }
 
   // メッセージ表示のダイアログを作成する
-  Widget AppContainer::message_dialog(String prompt, String apply_name, Apps *app, Widget owner) {
+  Widget AppContainer::message_dialog(String prompt, String apply_name, App *app, Widget owner) {
 
     Widget shell = XtVaCreatePopupShell("confirm", transientShellWidgetClass, owner, NULL );
     Widget dialog = XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, NULL );
@@ -708,7 +718,7 @@ namespace awt {
   }
 
   // 入力ダイアログを作成する
-  Widget AppContainer::input_dialog(String prompt, String defaultValue, String apply_name, Apps *app, Widget owner) {
+  Widget AppContainer::input_dialog(String prompt, String defaultValue, String apply_name, App *app, Widget owner) {
 
     Widget shell = XtVaCreatePopupShell("confirm", transientShellWidgetClass, owner, NULL );
     Widget dialog = XtVaCreateManagedWidget("dialog", dialogWidgetClass, shell, NULL );
@@ -728,11 +738,23 @@ namespace awt {
     return shell;
   }
 
+  Widget AppContainer::open_app(App *app, Display *display) {
+    app->setContainer(this);
+    String app_class = app->getAppClassName();
+    Widget top =
+      XtVaAppCreateShell(NULL, app_class, applicationShellWidgetClass, display, NULL);
+    app_shell_count++;
+    app->loadResouces(top);
+    app->createWidgets(top);
+    XtRealizeWidget(top);
+    sr->register_wm_hander(top);
+    return top;
+  }
 
   /// -------- ここまでコンテナのコード
 
 
-  class MessageApps : public Apps {
+  class MessageApp : public App {
     String getAppClassName();
     void loadResouces(Widget shell);
     void createWidgets(Widget shell); 
@@ -741,12 +763,12 @@ namespace awt {
     message_res res;
   };
 
-  String MessageApps::getAppClassName() {
+  String MessageApp::getAppClassName() {
     static String name = "Message";
     return name;
   }
 
-  void MessageApps::loadResouces(Widget shell) {
+  void MessageApp::loadResouces(Widget shell) {
     static XtResource resources[] = {
       { "message", "Message", XtRString, sizeof(String),
 	XtOffset(message_res *, message), XtRImmediate, (XtPointer)"Hello,world" },
@@ -754,7 +776,7 @@ namespace awt {
     XtVaGetApplicationResources(shell, &res, resources, XtNumber(resources), NULL);
   }
 
-  void MessageApps::createWidgets(Widget shell) {
+  void MessageApp::createWidgets(Widget shell) {
     Widget label =
       XtVaCreateManagedWidget("message", labelWidgetClass, shell,
 			      XtNjustify, XtJustifyCenter,
@@ -764,17 +786,17 @@ namespace awt {
 
   // --------------------------------------------------------------------------------
 
-  class ButtonApps : public Apps {
+  class ButtonApp : public App {
     String getAppClassName();
     void createWidgets(Widget shell); 
   };
 
-  String ButtonApps::getAppClassName() {
+  String ButtonApp::getAppClassName() {
     static String name = "ButtonOnly";
     return name;
   }
 
-  void ButtonApps::createWidgets(Widget shell) {
+  void ButtonApp::createWidgets(Widget shell) {
       Widget panel =
 	XtVaCreateManagedWidget("panel", boxWidgetClass, shell, NULL);
       Widget close =
@@ -785,23 +807,23 @@ namespace awt {
 
   // --------------------------------------------------------------------------------
 
-  class ConfirmApps : public Apps {
+  class ConfirmApp : public App {
     String getAppClassName();
     void createWidgets(Widget shell); 
     void command_proc(string &cmd, Widget widget);
   };
 
-  String ConfirmApps::getAppClassName() {
+  String ConfirmApp::getAppClassName() {
     static String name = "Confirm";
     return name;
   }
 
-  void ConfirmApps::command_proc(string &cmd, Widget widget) {
+  void ConfirmApp::command_proc(string &cmd, Widget widget) {
     if (cmd == "close" || cmd == "yes")
       disposeShell(widget);
   }
 
-  void ConfirmApps::createWidgets(Widget shell) {
+  void ConfirmApp::createWidgets(Widget shell) {
     Widget box = XtVaCreateManagedWidget("box", boxWidgetClass, shell, NULL);
     Widget press = XtVaCreateManagedWidget("press", commandWidgetClass, box, NULL);
 
@@ -812,7 +834,7 @@ namespace awt {
   /// --------------------------------------------------------------------------------
 
   // AWのクラスの継承ツリーを出力する
-  class ClassTreeApps : public Apps {
+  class ClassTreeApp : public App {
     // クラス名とそれを表示するウィジェットの組を保持する
     map<string, Widget> nodes;
     Widget find_node(WidgetClass wc);
@@ -822,13 +844,13 @@ namespace awt {
     void createWidgets(Widget shell); 
   };
 
-  String ClassTreeApps::getAppClassName() {
+  String ClassTreeApp::getAppClassName() {
     static String name = "CTree";
     return name;
   }
 
   // クラスに対応するwidgetを入手する
-  Widget ClassTreeApps::find_node(WidgetClass wc) {
+  Widget ClassTreeApp::find_node(WidgetClass wc) {
     const char *cn = getXtClassName(wc);
     map<string, Widget>::iterator it = nodes.find(cn);
     // クラス名でウィジェットを引き出す
@@ -836,7 +858,7 @@ namespace awt {
     return (*it).second;
   }
 
-  void ClassTreeApps::createWidgets(Widget top) {
+  void ClassTreeApp::createWidgets(Widget top) {
 
     Widget form =
       XtVaCreateManagedWidget("form",formWidgetClass, top, NULL);
@@ -910,7 +932,7 @@ namespace awt {
   }
 
   // クラスに対応するwidgetを追加する
-  Widget ClassTreeApps::add_node(WidgetClass wc, Widget tree) {
+  Widget ClassTreeApp::add_node(WidgetClass wc, Widget tree) {
     if (!wc) return None;
 
     Widget t = find_node(wc);
@@ -941,7 +963,7 @@ namespace awt {
   /// --------------------------------------------------------------------------------
   // フォルダの一覧
 
-  class FolderListApps : public Apps {
+  class FolderListApp : public App {
     Widget list;
     vector<string> entries;
 
@@ -951,32 +973,35 @@ namespace awt {
 
     static void item_selected_timer(XtPointer closure, XtIntervalId *id);
     static void list_item_selected( Widget widget, XtPointer client_data, XtPointer call_data);
-
+    void release();
   public:
-    FolderListApps() : list(0), timer(0), interval(400) { }
+    FolderListApp() : list(0), timer(0), interval(400) { }
     String getAppClassName();
     void createWidgets(Widget shell);
     void command_proc(string &cmd, Widget widget);
   };
 
-  String FolderListApps::getAppClassName() {
+  String FolderListApp::getAppClassName() {
     static String name = "FolderList";
     return name;
   }
 
+  void FolderListApp::release() {
+    if (timer) XtRemoveTimeOut(timer);
+  }
 
   // リストアイテムを選択した時の処理
-  void FolderListApps::item_selected_timer(XtPointer closure, XtIntervalId *id) {
-    FolderListApps *app = (FolderListApps *)closure;
+  void FolderListApp::item_selected_timer(XtPointer closure, XtIntervalId *id) {
+    FolderListApp *app = (FolderListApp *)closure;
     app->timer = 0;
     cerr << "TRACE: item selected:" << app->last_selected.list_index
 	 << ":" << app->last_selected.string << endl;
   }
 
   // リストアイテムを選択した時の処理
-  void FolderListApps::list_item_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
+  void FolderListApp::list_item_selected( Widget widget, XtPointer client_data, XtPointer call_data) {
     XawListReturnStruct *rs = (XawListReturnStruct *)call_data;
-    FolderListApps *app = (FolderListApps *)client_data;
+    FolderListApp *app = (FolderListApp *)client_data;
 
     app->last_selected = *rs;
     // このタイミングではタイマーを設定するだけで、主要な処理は遅延実行する
@@ -987,7 +1012,7 @@ namespace awt {
 		      app->interval, item_selected_timer, app);
   }
 
-  void FolderListApps::command_proc(string &cmd, Widget widget) {
+  void FolderListApp::command_proc(string &cmd, Widget widget) {
     if (cmd == "close" || cmd == "yes") {
       disposeShell(widget);
       return;
@@ -996,7 +1021,7 @@ namespace awt {
     cerr << "TRACE: " << cmd << " selected." << endl;
   }
 
-  void FolderListApps::createWidgets(Widget top) {
+  void FolderListApp::createWidgets(Widget top) {
 
     xwin::load_dirent(".", entries, false);
     String *slist = xwin::as_String_array(entries);
@@ -1139,7 +1164,7 @@ namespace awt {
     XawTextSetInsertionPoint(buf, pos + len);
   }
 
-  class EditorApps : public Apps {
+  class EditorApp : public App {
     TextBuffer tbuf;
     Widget status, goto_line_dialog;
     /// 時刻表示のタイマー
@@ -1154,20 +1179,31 @@ namespace awt {
     static void show_time_proc(XtPointer closure, XtIntervalId *id);
     static void show_potision_proc(XtPointer closure, XtIntervalId *id);
     static void position_callback(Widget widget, XtPointer client_data, XtPointer call_data);
+    void release();
 
   public:
-    EditorApps() : timer(0), interval(400) { }
+    EditorApp() : goto_line_dialog(0), timer(0), interval(400),
+		  position_timer(0), position_interval(400) {}
+    ~EditorApp();
     String getAppClassName();
     void createWidgets(Widget shell);
     void command_proc(string &cmd, Widget widget);
   };
 
-  String EditorApps::getAppClassName() {
+  EditorApp::~EditorApp() {
+  }
+
+  void EditorApp::release() {
+    if (timer) XtRemoveTimeOut(timer);
+    if (position_timer) XtRemoveTimeOut(position_timer);
+  }
+
+  String EditorApp::getAppClassName() {
     static String name = "Memo";
     return name;
   }
 
-  void EditorApps::command_proc(string &cmd, Widget widget) {
+  void EditorApp::command_proc(string &cmd, Widget widget) {
 
     if (cmd == "select-all") {
       tbuf.select_all();
@@ -1218,10 +1254,15 @@ namespace awt {
       return;
     }
 
+    if (cmd == "new") {
+      ac->open_app(new EditorApp(), XtDisplay(tbuf.buf));
+      return;
+    }
+
     cerr << "TRACE: " << cmd << " selected." << endl;
   }
 
-  void EditorApps::createWidgets(Widget top) {
+  void EditorApp::createWidgets(Widget top) {
     Widget pane =
       XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
     Widget menu_bar =
@@ -1261,6 +1302,7 @@ namespace awt {
       { "now", },
       { "goto-line", },
       { "sub-menu", submenu },
+      { "new", },
       { "-", },
       { "close", },
       { 0, },
@@ -1302,8 +1344,8 @@ namespace awt {
 
 
   /// 処理するイベントがなくなった時に呼び出される
-  Boolean EditorApps::text_ready(XtPointer closure) {
-    EditorApps *app = (EditorApps *)closure;
+  Boolean EditorApp::text_ready(XtPointer closure) {
+    EditorApp *app = (EditorApp *)closure;
 
     cerr << "TRACE: work proc called" << endl;
     wstring wtext = xwin::load_wtext(__FILE__);
@@ -1319,8 +1361,8 @@ namespace awt {
   }
 
   /// 現在時刻の表示
-  void EditorApps::show_time_proc(XtPointer closure, XtIntervalId *id) {
-    EditorApps *app = (EditorApps *)closure;
+  void EditorApp::show_time_proc(XtPointer closure, XtIntervalId *id) {
+    EditorApp *app = (EditorApp *)closure;
     struct tm local;
     fetch_localtime(&local);
 
@@ -1336,17 +1378,17 @@ namespace awt {
   }
 
   /// 現在カーソル位置の表示
-  void EditorApps::show_potision_proc(XtPointer closure, XtIntervalId *id) {
-    EditorApps *app = (EditorApps *)closure;
+  void EditorApp::show_potision_proc(XtPointer closure, XtIntervalId *id) {
+    EditorApp *app = (EditorApp *)closure;
     app->position_timer = 0;
     cerr << "Line: " << app->save_pos.line_number <<
       " Column: " << (app->save_pos.column_number + 1) << "     \r";
   }
 
   /// テキスト位置が変化したタイミングで呼び出される
-  void EditorApps::position_callback(Widget widget, XtPointer client_data, XtPointer call_data) {
+  void EditorApp::position_callback(Widget widget, XtPointer client_data, XtPointer call_data) {
     XawTextPositionInfo *pos = (XawTextPositionInfo *)call_data;
-    EditorApps *app = (EditorApps *)client_data;
+    EditorApp *app = (EditorApp *)client_data;
     if (0)
       cerr << XtName(widget) << " position callback" << endl;
     app->save_pos = *pos;
@@ -1358,37 +1400,194 @@ namespace awt {
   }
 
 
+  class EventViewApp : public App {
+    static void event_handler(Widget widget, XtPointer closure, XEvent *event, Boolean *continue_to_dispatch);
+    XIM xim;
+    XIMStyles *xim_styles;
+    XIMStyle xim_style;
+    XIC xic;
+  public:
+    EventViewApp() : xim(0), xim_styles(0), xim_style(0), xic(0) { }
+    String getAppClassName();
+    void createWidgets(Widget shell);
+  };
+
+  void EventViewApp::event_handler(Widget widget, XtPointer closure, XEvent *event, Boolean *continue_to_dispatch) {
+    report_action(widget, event, 0, 0);
+    *continue_to_dispatch = True;
+  }
+
+  String EventViewApp::getAppClassName() {
+    static String name = "EventView";
+    return name;
+  }
+
+  void EventViewApp::createWidgets(Widget top) {
+    char *modifiers, *imvalret;
+
+    Widget pane =
+      XtVaCreateManagedWidget("pane", panedWidgetClass, top, NULL );
+    Widget menu_bar =
+      XtVaCreateManagedWidget("menu_bar", boxWidgetClass, pane, NULL);
+    Widget close =
+      XtVaCreateManagedWidget("close", commandWidgetClass, menu_bar, NULL);
+
+    XtAddCallback(close, XtNcallback, item_selected, this);
+
+#define INNER_WINDOW_WIDTH 50
+#define INNER_WINDOW_HEIGHT 50
+#define INNER_WINDOW_BORDER 4
+#define INNER_WINDOW_X 10
+#define INNER_WINDOW_Y 10
+#define OUTER_WINDOW_MIN_WIDTH (INNER_WINDOW_WIDTH + \
+				2 * (INNER_WINDOW_BORDER + INNER_WINDOW_X))
+#define OUTER_WINDOW_MIN_HEIGHT (INNER_WINDOW_HEIGHT + \
+				2 * (INNER_WINDOW_BORDER + INNER_WINDOW_Y))
+#define OUTER_WINDOW_DEF_WIDTH (OUTER_WINDOW_MIN_WIDTH + 100)
+#define OUTER_WINDOW_DEF_HEIGHT (OUTER_WINDOW_MIN_HEIGHT + 100)
+#define OUTER_WINDOW_DEF_X 100
+#define OUTER_WINDOW_DEF_Y 100
+
+    Widget outer =
+      XtVaCreateManagedWidget("event",simpleWidgetClass, pane,
+			      XtNwidth, OUTER_WINDOW_DEF_WIDTH,
+			      XtNheight, OUTER_WINDOW_DEF_HEIGHT, NULL);
+
+    Widget outer2 =
+      XtVaCreateManagedWidget("event02",simpleWidgetClass, pane,
+			      XtNwidth, OUTER_WINDOW_DEF_WIDTH,
+			      XtNheight, OUTER_WINDOW_DEF_HEIGHT, NULL);
+
+
+    XtRealizeWidget(top);
+
+    unsigned long border, background;
+    XtVaGetValues(outer,
+		  XtNforeground, &border,
+		  XtNbackground, &background,
+		  NULL);
+
+    Window subw =
+      XCreateSimpleWindow(XtDisplay(top), XtWindow(outer),
+			  INNER_WINDOW_X, INNER_WINDOW_Y,
+			  INNER_WINDOW_WIDTH, INNER_WINDOW_HEIGHT,
+			  INNER_WINDOW_BORDER,
+			  border, background);
+
+    XMapWindow(XtDisplay(top), subw);
+
+    printf ("Outer window is 0x%lx, inner window is 0x%lx\n", XtWindow(outer), subw);
+
+    xim = XOpenIM (XtDisplay(top), NULL, NULL, NULL);
+    if (xim == NULL) {
+      fprintf (stderr, "XOpenIM failed\n");
+    }
+
+    if (xim) {
+      imvalret = XGetIMValues (xim, XNQueryInputStyle, &xim_styles, NULL);
+      if (imvalret != NULL || xim_styles == NULL) {
+	fprintf (stderr, "input method doesn't support any styles\n");
+      }
+
+      if (xim_styles) {
+	xim_style = 0;
+	for (int i = 0;  i < xim_styles->count_styles;  i++) {
+	  if (xim_styles->supported_styles[i] ==
+	      (XIMPreeditNothing | XIMStatusNothing)) {
+	    xim_style = xim_styles->supported_styles[i];
+	    break;
+	  }
+	}
+
+	if (xim_style == 0) {
+	  fprintf (stderr, "input method doesn't support the style we support\n");
+	}
+	XFree (xim_styles);
+      }
+    }
+
+    EventMask event_mask = KeyPressMask | KeyReleaseMask | ButtonPressMask |
+      ButtonReleaseMask | EnterWindowMask |
+      LeaveWindowMask | PointerMotionMask |
+      Button1MotionMask |
+      Button2MotionMask | Button3MotionMask |
+      Button4MotionMask | Button5MotionMask |
+      ButtonMotionMask | KeymapStateMask |
+      ExposureMask | VisibilityChangeMask |
+      StructureNotifyMask | /* ResizeRedirectMask | */
+      SubstructureNotifyMask | SubstructureRedirectMask |
+      FocusChangeMask | PropertyChangeMask |
+      ColormapChangeMask | OwnerGrabButtonMask;
+
+    XtAddEventHandler(outer, event_mask, True, event_handler, NULL);
+
+    if (xim && xim_style) {
+      xic = XCreateIC (xim,
+		       XNInputStyle, xim_style,
+		       XNClientWindow, XtWindow(outer),
+		       XNFocusWindow, XtWindow(outer),
+		       NULL);
+
+      if (xic == NULL) {
+	fprintf (stderr, "XCreateIC failed\n");
+      }
+    }
+
+  }
+
+
+
+};
+
+
+extern "C" {
+#include "xev.c"
 };
 
 extern "C"{
+  using namespace awt;
+
+  static App *create_message_app() { return new MessageApp(); }
+  static App *create_button_app() { return new ButtonApp(); }
+  static App *create_confirm_app() { return new ConfirmApp(); }
+  static App *create_ctree_app() { return new ClassTreeApp(); }
+  static App *create_folder_app() { return new FolderListApp(); }
+  static App *create_memo_app() { return new EditorApp(); }
+  static App *create_event_app() { return new EventViewApp(); }
+
   static int msg_window2(int argc, char **argv) {
-    awt::AppContainer ac;
-    return ac.run(argc, argv, new awt::MessageApps());
+    AppContainer ac;
+    return ac.run(argc, argv, create_message_app());
   }
 
   static int button_window(int argc, char **argv) {
-    awt::AppContainer ac;
-    return ac.run(argc, argv, new awt::ButtonApps());
+    AppContainer ac;
+    return ac.run(argc, argv, create_button_app());
   }
 
   static int confirm_window(int argc, char **argv) {
-    awt::AppContainer ac;
-    return ac.run(argc, argv, new awt::ConfirmApps());
+    AppContainer ac;
+    return ac.run(argc, argv, create_confirm_app());
   }
 
   static int ctree_window(int argc, char **argv) {
-    awt::AppContainer ac;
-    return ac.run(argc, argv, new awt::ClassTreeApps());
+    AppContainer ac;
+    return ac.run(argc, argv, create_ctree_app());
   }
 
   static int folder_window(int argc, char **argv) {
-    awt::AppContainer ac;
-    return ac.run(argc, argv, new awt::FolderListApps());
+    AppContainer ac;
+    return ac.run(argc, argv, create_folder_app());
   }
 
   static int memo_window(int argc, char **argv) {
-    awt::AppContainer ac;
-    return ac.run(argc, argv, new awt::EditorApps());
+    AppContainer ac;
+    return ac.run(argc, argv, create_memo_app());
+  }
+
+  static int event_window(int argc, char **argv) {
+    AppContainer ac;
+    return ac.run(argc, argv, create_event_app());
   }
 
 };
@@ -1408,6 +1607,7 @@ subcmd dawt_cmap[] = {
   { "d:tree", ctree_window, },
   { "d:folder", folder_window, },
   { "d:memo", memo_window, },
+  { "d:event", event_window, },
   { 0 },
 };
 

@@ -1,11 +1,11 @@
 
 #include <X11/Xproto.h>
 
-const char *Yes = "YES";
-const char *No = "NO";
-const char *Unknown = "unknown";
+static const char *Yes = "YES";
+static const char *No = "NO";
+static const char *Unknown = "unknown";
 
-XIC xic = NULL;
+static XIC xic = NULL;
 
 static void
 prologue (XEvent *eventp, const char *event_name)
