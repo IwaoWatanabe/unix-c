@@ -10,6 +10,11 @@
 #include <libgen.h>
 #include <unistd.h>
 
+#ifdef DARWIN
+#include <libproc.h>
+#endif
+
+
 using namespace std;
 
 namespace uc {
@@ -97,7 +102,7 @@ namespace uc {
     error_log = 0;
 
     if (counter > 0)
-      fprintf(stderr,"INFO: logger %s output %ld bytes.\n", 
+      fprintf(stderr,"TRACE: logger %s output %ld bytes.\n", 
 	      error_logfile_name, counter);
 
     counter = 0;
@@ -218,12 +223,19 @@ extern "C" {
     cmd = getenv("COMMAND");
     if (cmd) return cmd;
 
+#ifdef DARWIN
+    char pbuf[256];
+    proc_name(getpid(), pbuf, sizeof pbuf);
+    cmd = strdup(pbuf);
+    if (!cmd) cmd = "noname";
+
+#else
     char pbuf[80];
     snprintf(pbuf,sizeof pbuf,"/proc/%d/cmdline", getpid());
     
     FILE *fp;
     if ((fp = fopen(pbuf,"r")) == NULL) {
-      fprintf(stderr,"ERROR: fopen %s:(%d):%s\n",
+      fprintf(stderr,"WARNING: fopen %s:(%d):%s\n",
 	      pbuf, errno, strerror(errno));
       return cmd = "noname";
     }
@@ -239,6 +251,8 @@ extern "C" {
       fprintf(stderr,"WARNING: fclose:(%d):%s\n", 
 	      errno, strerror(errno));
     }
+#endif
+
     return cmd;
   }
 
@@ -291,10 +305,10 @@ namespace uc {
   ELog::velog(int level, const char *format, va_list args) {
     int ct = mgr ? ((ELog_Manager *)mgr)->vlog(level, format, args) : 
       vfprintf(stderr,format, args);
-    if (!mgr) {
-      size_t len = strlen(format);
-      if (len && format[len - 1] != '\n') fputc('\n',stderr), ct++;
-    }
+
+    size_t len = strlen(format);
+    if (len && format[len - 1] != '\n') fputc('\n',stderr), ct++;
+
     return ct;
   }
 
@@ -372,19 +386,19 @@ namespace {
     init_elog(argv[0]);
 
     if (argc == 1) {
-      elog("logger test\n");
-      elog(F, "logger test\n");
-      elog(E, "logger test\n");
-      elog(W, "logger test\n");
-      elog(N, "logger test\n");
-      elog(I, "logger test\n");
-      elog(A, "logger test\n");
-      elog(D, "logger test\n");
-      elog(T, "logger test\n");
+      elog("logger test");
+      elog(F, "logger test");
+      elog(E, "logger test");
+      elog(W, "logger test");
+      elog(N, "logger test");
+      elog(I, "logger test");
+      elog(A, "logger test");
+      elog(D, "logger test");
+      elog(T, "logger test");
     }
 
     for (int i = 1; i < argc; i++) {
-      elog(I, "%d: %s\n",i, argv[i]);
+      elog(I, "%d: %s",i, argv[i]);
     }
 
     return EXIT_SUCCESS;
