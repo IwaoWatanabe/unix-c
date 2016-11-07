@@ -1,5 +1,6 @@
 
 # make Darwin=1  # for MacOS X
+# make USE_MOTIF=1
 
 CXXFLAGS = -g -fexceptions
 CXXFLAGS += -fPIC
@@ -154,9 +155,13 @@ ifndef Darwin
 LIBUC_OBJS += kvs-ndbm.o
 LIBUC_OBJS += kvs-gdbm.o
 LDFLAGS += -lgdbm
+endif
 
+ifdef USE_SENNA
 LIBUC_OBJS += index.o
 LDFLAGS += -lmecab -lsenna
+else
+CXXFLAGS += -DNOUSE_INDEX
 endif
 
 ifdef USE_MOTIF
